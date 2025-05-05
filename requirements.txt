@@ -1,0 +1,17 @@
+# --- Required Modules --- #
+# discord.py: For interacting with the Discord API.
+# discord.ext.commands: For creating bot commands.
+# dotenv: For loading environment variables from a .env file.
+# re: For regular expressions (used for parsing and formatting text).
+# os: For interacting with the operating system (used for accessing environment variables).
+# asyncio: For asynchronous programming.
+# datetime: For working with dates and times (used for cooldowns and the today command).
+# logging: For logging bot events and errors.
+# requests: For making HTTP requests (used for the web search functionality).
+# google.generativeai: For interacting with the Gemini API.
+# urllib.parse: For encoding URLs (used in the search command).
+
+discord.py
+python-dotenv
+requests
+google-generativeai
