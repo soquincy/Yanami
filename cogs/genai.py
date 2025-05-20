@@ -12,12 +12,12 @@ import urllib.parse # Added for web_search encoding
 
 # Intents
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
-Google_Search_API_KEY = os.getenv("GOOGLE_SEARCH_API_KEY") # Use standard naming convention
+GOOGLE_SEARCH_API_KEY = os.getenv("GOOGLE_SEARCH_API_KEY") # Use standard naming convention
 SEARCH_ENGINE_ID = os.getenv("SEARCH_ENGINE_ID")
 
 if not GOOGLE_API_KEY:
     raise ValueError("GOOGLE_API_KEY not found in environment variables!")
-if not Google_Search_API_KEY:
+if not GOOGLE_SEARCH_API_KEY:
     raise ValueError("GOOGLE_SEARCH_API_KEY not found in environment variables!")
 if not SEARCH_ENGINE_ID:
     raise ValueError("SEARCH_ENGINE_ID not found in environment variables!")
