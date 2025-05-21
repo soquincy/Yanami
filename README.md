@@ -43,7 +43,7 @@ To run Anna yourself, follow these steps:
         BOT_TOKEN=YOUR_DISCORD_BOT_TOKEN
         GOOGLE_API_KEY=YOUR_GEMINI_API_KEY
         CHANNEL_ID=YOUR_DISCORD_CHANNEL_ID
-        Google_Search_API_KEY=YOUR_GOOGLE_CUSTOM_SEARCH_API_KEY
+        GOOGLE_CUSTOM_SEARCH_API_KEY=YOUR_GOOGLE_CUSTOM_SEARCH_API_KEY
         SEARCH_ENGINE_ID=YOUR_GOOGLE_CUSTOM_SEARCH_ENGINE_ID
         ```
     * **Get your Discord Bot Token:** Create a bot application on the [Discord Developer Portal](https://discord.com/developers/applications) and get its token.
