@@ -63,7 +63,7 @@ Contributions to the project are welcome! If you have suggestions or want to add
 
 ## License
 
-This project is licensed under the **GNU General Public License v3.0**. See the [LICENSE](LICENSE) file for more details.
+This project is licensed under the **MIT License**. See the [LICENSE](LICENSE) file for more details.
 
 ## Acknowledgements
 

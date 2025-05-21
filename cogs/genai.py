@@ -134,7 +134,7 @@ async def web_search(query: str, num_results: int = 5) -> str:
     Runs the blocking API call in a separate thread.
     """
     logger.info(f"Performing Google Custom Search for: {query}")
-    api_key = Google_Search_API_KEY
+    api_key = GOOGLE_SEARCH_API_KEY
     cse_id = SEARCH_ENGINE_ID
     search_url = "https://www.googleapis.com/customsearch/v1"
     params = {
