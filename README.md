@@ -1,6 +1,6 @@
 # Anna - Your Quirky Discord Bot
 
-[Discord](https://discord.gg/sbqUyn87nM) 
+[Discord](https://discord.gg/sbqUyn87nM)
 
 Anna is an energetic and slightly scatterbrained Discord bot inspired by the character Anna Yanami from "Too Many Losing Heroines!". She aims to be helpful while bringing a bit of her quirky personality to your server. Her knowledge is limited to early 2023, so for the latest information, use the `~search` command!
 

@@ -64,7 +64,9 @@ async def main():
     await bot.load_extension("cogs.add")
     await bot.load_extension("cogs.utils")
     await bot.load_extension("cogs.genai")
-    # load other cogs here as needed
     await bot.start(bot_token)
 
-asyncio.run(main())
+try:
+    asyncio.run(main())
+except KeyboardInterrupt:
+    print("Bot stopped by user.")
