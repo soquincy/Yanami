@@ -3,6 +3,8 @@ from discord.ext import commands
 import os
 import logging
 import asyncio
+import uvicorn
+from fastapi_server import app
 from dotenv import load_dotenv
 
 load_dotenv(os.path.join(os.path.dirname(__file__), "bot_token.env"))
@@ -58,7 +60,12 @@ async def on_command_error(ctx, error):
 
 bot.remove_command('help')
 
-async def main():
+async def start_http():
+    config = uvicorn.Config(app, host="0.0.0.0", port=10000, log_level="warning")
+    server = uvicorn.Server(config)
+    await server.serve()
+
+async def start_bot():
     await bot.load_extension("cogs.hello")
     await bot.load_extension("cogs.help")
     await bot.load_extension("cogs.utils")
@@ -66,7 +73,14 @@ async def main():
     await bot.load_extension("cogs.wolfram")
     await bot.start(bot_token)
 
-try:
-    asyncio.run(main())
-except KeyboardInterrupt:
-    print("Bot stopped by user.")
+async def main():
+    await asyncio.gather(
+        start_http(),
+        start_bot()
+    )
+
+if __name__ == "__main__":
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        print("Bot stopped.")
