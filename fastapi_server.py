@@ -2,6 +2,6 @@ from fastapi import FastAPI
 
 app = FastAPI()
 
-@app.get("/ping")
-async def ping():
-    return {"status": "alive"}
+@app.get("/")
+async def root():
+    return {"status": "ok"}
