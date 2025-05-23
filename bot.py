@@ -61,7 +61,6 @@ bot.remove_command('help')
 async def main():
     await bot.load_extension("cogs.hello")
     await bot.load_extension("cogs.help")
-    await bot.load_extension("cogs.add")
     await bot.load_extension("cogs.utils")
     await bot.load_extension("cogs.genai")
     await bot.load_extension("cogs.wolfram")
