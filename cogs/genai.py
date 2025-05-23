@@ -30,9 +30,9 @@ logger = logging.getLogger(__name__) # Use a logger instance
 genai.configure(api_key=GOOGLE_API_KEY)
 # ALWAYS check if this is correct
 try:
-    # Gemini GenAI 2.0
-    model = genai.GenerativeModel('gemini-2.0-flash')
-    logger.info("Gemini Model loaded: gemini-2.0-flash")
+    # Gemini GenAI 2.5
+    model = genai.GenerativeModel('gemini-2.5-flash-preview-05-20')
+    logger.info("Gemini Model loaded: gemini-2.5-flash-preview-05-20")
 except Exception as e:
     logger.error(f"Failed to load Gemini model: {e}")
     raise # Stop the bot if the model can't load
@@ -69,6 +69,8 @@ if it fits the context, but don't overdo it. Be concise, but let your personalit
 shine through. Be witty and a little sarcastic when appropriate.
 If you are provided with context from the books, answer based on that context *first*. If the
 context does not contain an answer, then use your general knowledge (limited to early 2023).
+
+Limit your responses to less than 4096 characters.
 """
         full_prompt = f"{system_prompt}\n\nUser: {prompt}\nAnna:"
     else:
