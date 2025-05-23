@@ -64,6 +64,7 @@ async def main():
     await bot.load_extension("cogs.add")
     await bot.load_extension("cogs.utils")
     await bot.load_extension("cogs.genai")
+    await bot.load_extension("cogs.wolfram")
     await bot.start(bot_token)
 
 try:

@@ -10,7 +10,7 @@ Here's what Anna can do:
 
 * **Chat & Ask:** Use the `~write` or `~ask` command to have a chat with Anna, powered by the Gemini AI.
 * **Web Search:** Need up-to-date info? Use `~search <your query>` to get a summary from the web.
-* **Math:** Add two whole numbers with the `~add <number1> <number2>` command.
+* **Math:** Can answer simple math questions with the Wolfram|Alpha API.
 * **Greetings:** Say hello with `~hello`.
 * **Date:** Find out the current date with `~today`.
 * **Moderation:** (Requires appropriate permissions)
@@ -45,11 +45,14 @@ To run Anna yourself, follow these steps:
         CHANNEL_ID=YOUR_DISCORD_CHANNEL_ID
         GOOGLE_CUSTOM_SEARCH_API_KEY=YOUR_GOOGLE_CUSTOM_SEARCH_API_KEY
         SEARCH_ENGINE_ID=YOUR_GOOGLE_CUSTOM_SEARCH_ENGINE_ID
+        WOLFRAM_APPID_SHORT=YOUR_WOLFRAM_APPID_SHORT
+        WOLFRAM_APPID_FULL=YOUR_WOLFRAM_APPID_FULL
         ```
     * **Get your Discord Bot Token:** Create a bot application on the [Discord Developer Portal](https://discord.com/developers/applications) and get its token.
     * **Get your Gemini API Key:** You can obtain a Gemini API key from the [Google Cloud AI Platform](https://console.cloud.google.com/vertex-ai/generative/language/get-started).
     * **Get your Discord Channel ID:** Enable Developer Mode in Discord (User Settings > Advanced) and then right-click on the desired channel and select "Copy ID".
     * **Get your Google Custom Search API Key and Engine ID:** Set up a Custom Search Engine on the [Google Cloud Console](https://console.cloud.google.com/) and obtain your API key and Search Engine ID.
+    * **Get your Wolfram|Alpha App IDs:** Log in or create a Wolfram Account [here](https://developer.wolframalpha.com/) then get 'Full Results API' and 'Short Answers API' App IDs. 
 
 4.  **Run the bot:**
     ```bash

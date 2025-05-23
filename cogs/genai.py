@@ -10,6 +10,7 @@ import requests
 import google.generativeai as genai
 import urllib.parse # Added for web_search encoding
 
+
 # Intents
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 GOOGLE_SEARCH_API_KEY = os.getenv("GOOGLE_SEARCH_API_KEY") # Use standard naming convention

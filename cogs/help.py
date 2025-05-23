@@ -25,11 +25,11 @@ class HelpCog(commands.Cog):
                 if cmd.hidden:
                     continue
 
-                if cmd.name in ['add', 'hello', 'write', 'ask', 'today']:
+                if cmd.name in ['hello', 'write', 'ask', 'today']:
                     fun_cmds.append(f"`{prefix}{cmd.name}` - {cmd.help or 'No description'}")
                 elif cmd.name in ['kick', 'purge', 'removetimeout', 'rt', 'timeout', 'ban']:
                     mod_cmds.append(f"`{prefix}{cmd.name}` - {cmd.help or 'No description'}")
-                elif cmd.name in ['search', 'help']:
+                elif cmd.name in ['math', 'search', 'help']:
                     util_cmds.append(f"`{prefix}{cmd.name}` - {cmd.help or 'No description'}")
 
             if fun_cmds:
