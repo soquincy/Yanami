@@ -159,17 +159,92 @@ def is_potentially_outdated(text: str, threshold: int = 2) -> bool:
             return True
     return False
 
+def format_gemini_response(text):
+    """Formats the Gemini response for better Discord display."""
+    # Remove extra spaces
+    text = re.sub(r' +', ' ', text).strip()
+    # Basic Markdown improvements (can be expanded)
+    # Bold lines starting with * or - (likely list headers)
+    text = re.sub(r'^\s*([*+-])\s+(.*?):', r'**\1 \2:**', text, flags=re.MULTILINE)
+    return text
+
 # --- Discord Cog ---
 
 class AnnaCog(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
-    @commands.command(name="search", help="Search the web using Google.")
-    async def search_command(self, ctx: commands.Context, *, query: str):
-        results = await web_search(query)
-        summary = await summarize_with_gemini(results, query)
-        await ctx.send(truncate_string(format_response(summary)))
+    @commands.command(name='search', help='Searches the web using Google Search.')
+    @commands.cooldown(rate=1, per=10, type=commands.BucketType.user)
+    async def search_cmd(self, ctx, *, query: str):
+        await ctx.typing()
+
+        search_results = await web_search(query, num_results=5)
+
+        if search_results == "No relevant results found." or \
+           "error" in search_results.lower() or \
+           "timed out" in search_results.lower():
+            error_reason = f" ({search_results})" if "error" in search_results.lower() else ""
+            await ctx.send(f"Couldn't find useful results for '{query}'{error_reason}. Maybe try different keywords?")
+            return
+
+        summary = await summarize_with_gemini(search_results, query)
+
+        # Handle summary failure here (if needed)
+        # ...
+
+        formatted_summary = format_gemini_response(summary)
+        final_text = truncate_string(formatted_summary)
+
+        embed = discord.Embed(
+            title=f"🔎 Google Search Summary for '{query}'",
+            description=final_text,
+            color=discord.Color.blue()
+        )
+        google_search_link = f"https://www.google.com/search?q={urllib.parse.quote(query)}"
+        embed.add_field(name="Search Link", value=f"[View on Google]({google_search_link})", inline=False)
+        embed.set_footer(text="Summarized using Gemini based on Google Custom Search results.")
+        await ctx.send(embed=embed)
+
+    @commands.command(name='write', aliases=['ask'], help='Ask Anna anything! Uses Google Gemini.')
+    @commands.cooldown(rate=1, per=5, type=commands.BucketType.user)
+    async def write_cmd(self, ctx, *, query: str):
+        await ctx.typing()
+        initial_response_text = await generate_gemini_content(query, apply_persona=True)
+
+        search_fallback = False
+        search_query_suffix = ""
+        if "potential copyright restrictions" in initial_response_text:
+            search_query_suffix = " recipe" if "recipe" in query.lower() else ""
+            search_fallback = True
+        elif "safety concerns" in initial_response_text or "safety filters blocked" in initial_response_text:
+            search_fallback = True
+
+        search_links = ""
+        if search_fallback:
+            await ctx.send("Hmm, I can't directly answer that, but maybe the web can help! Searching...")
+            await ctx.typing()
+            search_results = await web_search(query + search_query_suffix)
+            if search_results and "No relevant results" not in search_results and "Error" not in search_results:
+                links = re.findall(r'\((https?://.*?)\)', search_results)
+                if links:
+                    search_links = "\n\nMaybe these links will help?\n" + "\n".join(f"- <{link}>" for link in links[:3])
+            else:
+                search_links = "\n\nI tried searching, but couldn't find helpful links either."
+
+        response_text = initial_response_text + search_links
+
+        formatted_text = format_gemini_response(response_text)
+        truncated_text = truncate_string(formatted_text)
+
+        embed = discord.Embed(
+            title="✨ Anna Says...",
+            description=truncated_text,
+            color=discord.Color.random()
+        )
+        embed.set_footer(text=f"Asked by {ctx.author.display_name}", icon_url=ctx.author.display_avatar.url)
+        await ctx.send(embed=embed)
+
 
 async def setup(bot):
     await bot.add_cog(AnnaCog(bot))
