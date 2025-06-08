@@ -39,7 +39,7 @@ class HelpCog(commands.Cog):
             if util_cmds:
                 embed.add_field(name="🔧 Utility", value="\n".join(util_cmds), inline=False)
 
-            embed.set_footer(text="Remember, my knowledge is mostly from early 2023!")
+            embed.set_footer(text="Remember, my knowledge is mostly from early 2025!")
             await ctx.send(embed=embed)
 
         else:
