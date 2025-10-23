@@ -73,4 +73,4 @@ This project is licensed under the **MIT License**. See the [LICENSE](LICENSE) f
 * [discord.py](https://discord.py/) for providing the Discord API wrapper.
 * [Google Generative AI](https://ai.google.dev/) for the Gemini API.
 * [Google Cloud Custom Search API](https://developers.google.com/custom-search/v1/overview) for the web search functionality.
-* The creators of "Too Many Losing Heroines!" for the inspiration behind Anna's character.
+* The creator of "Too Many Losing Heroines!" for the inspiration behind Anna's character.
