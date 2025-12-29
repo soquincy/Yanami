@@ -36,7 +36,7 @@ for key, val in {
 # Configure Gemini
 genai.configure(api_key=GOOGLE_API_KEY)
 try:
-    model = genai.GenerativeModel("gemini-2.5-flash-preview-05-20")
+    model = genai.GenerativeModel("gemini-3-flash-preview")
     logger.info("Gemini model loaded successfully.")
 except Exception as e:
     logger.error(f"Failed to load Gemini model: {e}", exc_info=True)
