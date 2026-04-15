@@ -23,6 +23,7 @@ intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True
 intents.dm_messages = True
+intents.guilds = True
 
 bot = commands.Bot(command_prefix="~", intents=intents)
 
@@ -71,6 +72,7 @@ async def start_bot():
     await bot.load_extension("cogs.utils")
     await bot.load_extension("cogs.genai")
     await bot.load_extension("cogs.wolfram")
+    await bot.load_extension("cogs.status")
     await bot.start(bot_token)
 
 async def main():
