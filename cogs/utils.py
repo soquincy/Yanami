@@ -17,7 +17,15 @@ def parse_time_string(time_str: str) -> timedelta | None:
     except (ValueError, IndexError):
         return None
 
-class ModerationCog(commands.Cog):
+async def try_dm(user: discord.User | discord.Member, embed: discord.Embed) -> bool:
+    """Attempt to DM a user. Returns True if successful."""
+    try:
+        await user.send(embed=embed)
+        return True
+    except (discord.Forbidden, discord.HTTPException):
+        return False
+
+class UtilCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
@@ -41,11 +49,9 @@ class ModerationCog(commands.Cog):
     @commands.has_permissions(ban_members=True)
     @commands.bot_has_permissions(ban_members=True)
     async def ban_cmd(self, ctx, member: discord.User, *, reason: str = "No reason provided"):
-        # Attempt to get member from guild
         target = ctx.guild.get_member(member.id)
 
         if target:
-            # User is in the server
             if target == ctx.author:
                 await ctx.send("You can't ban yourself.")
                 return
@@ -56,9 +62,22 @@ class ModerationCog(commands.Cog):
                 await ctx.send("You can't ban someone with a role higher than or equal to yours.")
                 return
 
+            # DM before banning (only possible if they're still in the server)
+            dm_embed = discord.Embed(
+                title="You have been banned",
+                color=discord.Color.red()
+            )
+            dm_embed.add_field(name="Server", value=ctx.guild.name, inline=False)
+            dm_embed.add_field(name="Reason", value=reason, inline=False)
+            dm_embed.add_field(name="Moderator", value=str(ctx.author), inline=False)
+            dm_sent = await try_dm(target, dm_embed)
+        else:
+            dm_sent = False  # Can't DM someone not in the server
+
         try:
             await ctx.guild.ban(member, reason=f"Banned by {ctx.author}: {reason}")
-            await ctx.send(f"{member.mention if isinstance(member, discord.Member) else member.name} has been banned. Reason: {reason}")
+            note = "" if dm_sent else " *(couldn't DM user)*"
+            await ctx.send(f"{member.mention if isinstance(member, discord.Member) else member.name} has been banned. Reason: {reason}{note}")
             logger.info(f"{ctx.author} banned {member}. Reason: {reason}")
         except discord.NotFound:
             await ctx.send("User not found. They might not exist or already be banned.")
@@ -81,9 +100,21 @@ class ModerationCog(commands.Cog):
         if ctx.author.top_role <= member.top_role and ctx.guild.owner != ctx.author:
             await ctx.send("You can't kick someone with a role higher than or equal to yours.")
             return
+
+        # DM before kicking
+        dm_embed = discord.Embed(
+            title="You have been kicked",
+            color=discord.Color.orange()
+        )
+        dm_embed.add_field(name="Server", value=ctx.guild.name, inline=False)
+        dm_embed.add_field(name="Reason", value=reason, inline=False)
+        dm_embed.add_field(name="Moderator", value=str(ctx.author), inline=False)
+        dm_sent = await try_dm(member, dm_embed)
+
         try:
             await member.kick(reason=f"Kicked by {ctx.author.name}: {reason}")
-            await ctx.send(f"{member.mention} has been kicked. Reason: {reason}")
+            note = "" if dm_sent else " *(couldn't DM user)*"
+            await ctx.send(f"{member.mention} has been kicked. Reason: {reason}{note}")
             logger.info(f"{ctx.author.name} kicked {member.name}. Reason: {reason}")
         except discord.Forbidden:
             await ctx.send("I don't have the permissions to kick this member. Check my roles?")
@@ -95,11 +126,9 @@ class ModerationCog(commands.Cog):
     @commands.has_permissions(moderate_members=True)
     @commands.bot_has_permissions(moderate_members=True)
     async def timeout_cmd(self, ctx, member: discord.Member, time_str: str, *, reason: str = "No reason provided"):
-        # Reject invalid targets
         if not isinstance(member, discord.Member):
             await ctx.send("That user isn't in this server.")
             return
-
         if member == ctx.author:
             await ctx.send("Can't timeout yourself!")
             return
@@ -110,7 +139,6 @@ class ModerationCog(commands.Cog):
             await ctx.send("You can't timeout someone with a role higher than or equal to yours.")
             return
 
-        # Parse time
         delta = parse_time_string(time_str)
         if delta is None:
             await ctx.send("Invalid time format. Use: `10s`, `5m`, `1h`, `3d`, etc.")
@@ -124,29 +152,40 @@ class ModerationCog(commands.Cog):
             await ctx.send("Timeout duration must be positive.")
             return
 
+        # Format duration for display
+        total_seconds = int(delta.total_seconds())
+        if total_seconds < 60:
+            duration_display = f"{total_seconds}s"
+        elif total_seconds < 3600:
+            minutes = total_seconds // 60
+            seconds = total_seconds % 60
+            duration_display = f"{minutes}m" + (f" {seconds}s" if seconds > 0 else "")
+        elif total_seconds < 86400:
+            hours = total_seconds // 3600
+            remaining = total_seconds % 3600
+            minutes = remaining // 60
+            duration_display = f"{hours}h" + (f" {minutes}m" if minutes > 0 else "")
+        else:
+            days = total_seconds // 86400
+            remaining = total_seconds % 86400
+            hours = remaining // 3600
+            duration_display = f"{days}d" + (f" {hours}h" if hours > 0 else "")
+
+        # DM before timeout
+        dm_embed = discord.Embed(
+            title="You have been timed out",
+            color=discord.Color.yellow()
+        )
+        dm_embed.add_field(name="Server", value=ctx.guild.name, inline=False)
+        dm_embed.add_field(name="Duration", value=duration_display, inline=False)
+        dm_embed.add_field(name="Reason", value=reason, inline=False)
+        dm_embed.add_field(name="Moderator", value=str(ctx.author), inline=False)
+        dm_sent = await try_dm(member, dm_embed)
+
         try:
             await member.timeout(delta, reason=f"Timed out by {ctx.author.name}: {reason}")
-            
-            # Format the actual applied duration
-            total_seconds = int(delta.total_seconds())
-            if total_seconds < 60:
-                duration_display = f"{total_seconds}s"
-            elif total_seconds < 3600:
-                minutes = total_seconds // 60
-                seconds = total_seconds % 60
-                duration_display = f"{minutes}m" + (f" {seconds}s" if seconds > 0 else "")
-            elif total_seconds < 86400:
-                hours = total_seconds // 3600
-                remaining = total_seconds % 3600
-                minutes = remaining // 60
-                duration_display = f"{hours}h" + (f" {minutes}m" if minutes > 0 else "")
-            else:
-                days = total_seconds // 86400
-                remaining = total_seconds % 86400
-                hours = remaining // 3600
-                duration_display = f"{days}d" + (f" {hours}h" if hours > 0 else "")
-            
-            await ctx.send(f"{member.mention} has been timed out for {duration_display}. Reason: {reason}")
+            note = "" if dm_sent else " *(couldn't DM user)*"
+            await ctx.send(f"{member.mention} has been timed out for {duration_display}. Reason: {reason}{note}")
             logger.info(f"{ctx.author.name} timed out {member.name} for {duration_display}. Reason: {reason}")
         except discord.Forbidden:
             await ctx.send("I can't timeout that member. Check my permissions and role position.")
@@ -154,16 +193,27 @@ class ModerationCog(commands.Cog):
             logger.error(f"Failed to timeout {member.name}: {e}")
             await ctx.send(f"Something went wrong trying to timeout {member.mention}.")
 
-    @commands.command(name='removetimeout', aliases=['rt', 'ut', 'untimeout'], help='Removes a timeout from a member.')
+    @commands.command(name='removetimeout', aliases=['rt', 'rto', 'ut', 'untimeout'], help='Removes a timeout from a member.')
     @commands.has_permissions(moderate_members=True)
     @commands.bot_has_permissions(moderate_members=True)
     async def removetimeout_cmd(self, ctx, member: discord.Member):
         if not member.is_timed_out():
             await ctx.send(f"{member.mention} isn't currently timed out.")
             return
+
+        # DM before removing timeout
+        dm_embed = discord.Embed(
+            title="Your timeout has been removed",
+            color=discord.Color.green()
+        )
+        dm_embed.add_field(name="Server", value=ctx.guild.name, inline=False)
+        dm_embed.add_field(name="Moderator", value=str(ctx.author), inline=False)
+        dm_sent = await try_dm(member, dm_embed)
+
         try:
             await member.timeout(None, reason=f"Timeout removed by {ctx.author.name}")
-            await ctx.send(f"Okay, {member.mention}'s timeout has been removed.")
+            note = "" if dm_sent else " *(couldn't DM user)*"
+            await ctx.send(f"Okay, {member.mention}'s timeout has been removed.{note}")
             logger.info(f"{ctx.author.name} removed timeout from {member.name}.")
         except discord.Forbidden:
             await ctx.send("I don't have the permissions to remove timeouts. Check my 'Moderate Members' permission.")
@@ -172,4 +222,4 @@ class ModerationCog(commands.Cog):
             await ctx.send(f"Something went wrong trying to remove the timeout from {member.mention}.")
 
 async def setup(bot):
-    await bot.add_cog(ModerationCog(bot))
+    await bot.add_cog(UtilCog(bot))

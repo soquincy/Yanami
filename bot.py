@@ -1,5 +1,6 @@
 import discord
 from discord.ext import commands
+from discord import abc
 import os
 import logging
 import asyncio
@@ -7,12 +8,16 @@ import uvicorn
 from fastapi_server import app
 from dotenv import load_dotenv
 
-load_dotenv(os.path.join(os.path.dirname(__file__), "bot_token.env"))
+load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
+
 bot_token = os.getenv("BOT_TOKEN")
 channel_id_str = os.getenv("CHANNEL_ID")
 
 if not bot_token or not channel_id_str:
     raise ValueError("Missing BOT_TOKEN or CHANNEL_ID in environment variables")
+
+# Explicitly cast so Pylance knows these are str, not str | None
+bot_token = str(bot_token)
 
 try:
     CHANNEL_ID = int(channel_id_str)
@@ -30,11 +35,18 @@ bot = commands.Bot(command_prefix="~", intents=intents)
 logging.basicConfig(level=logging.INFO, format='%(asctime)s:%(levelname)s:%(name)s: %(message)s')
 logger = logging.getLogger(__name__)
 
+
 @bot.event
 async def on_ready():
-    logger.info(f"Logged in as {bot.user} (ID: {bot.user.id})")
+    # bot.user is guaranteed non-None inside on_ready
+    user = bot.user
+    if user is None:
+        return
+    logger.info(f"Logged in as {user} (ID: {user.id})")
+
     channel = bot.get_channel(CHANNEL_ID)
-    if channel:
+    # Narrow to only channels that support .send (Messageable excludes Forum/Category/PrivateChannel)
+    if isinstance(channel, abc.Messageable):
         try:
             await channel.send(
                 "Heya! Anna here! My knowledge is mostly from early 2023. "
@@ -43,7 +55,8 @@ async def on_ready():
         except Exception as e:
             logger.warning(f"Failed to send startup message: {e}")
     else:
-        logger.warning(f"Channel with ID {CHANNEL_ID} not found.")
+        logger.warning(f"Channel with ID {CHANNEL_ID} not found or does not support messages.")
+
 
 @bot.event
 async def on_command_error(ctx, error):
@@ -59,12 +72,15 @@ async def on_command_error(ctx, error):
         logger.error(f"Error in command {ctx.command}: {error}", exc_info=True)
         await ctx.send("An error occurred. Please try again later.")
 
+
 bot.remove_command('help')
+
 
 async def start_http():
     config = uvicorn.Config(app, host="0.0.0.0", port=10000, log_level="warning")
     server = uvicorn.Server(config)
     await server.serve()
+
 
 async def start_bot():
     await bot.load_extension("cogs.hello")
@@ -73,13 +89,16 @@ async def start_bot():
     await bot.load_extension("cogs.genai")
     await bot.load_extension("cogs.wolfram")
     await bot.load_extension("cogs.status")
+    assert bot_token is not None
     await bot.start(bot_token)
+
 
 async def main():
     await asyncio.gather(
         start_http(),
         start_bot()
     )
+
 
 if __name__ == "__main__":
     try:

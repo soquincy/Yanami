@@ -1,3 +1,6 @@
+# genai.py: This is the cog for any AI-related tasks including search overviews.
+# This is ran with Google Gemini. If you dislike this feature, you may remove this cog in bot.py, line 73.
+
 import os
 import re
 import asyncio
@@ -10,21 +13,22 @@ import discord
 from discord.ext import commands
 from dotenv import load_dotenv
 import urllib.parse
-import google.generativeai as genai
+from google import genai
 
 # Load .env variables
 load_dotenv()
 
 # Logging setup
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
-logger = logging.getLogger("AnnaBot")
+logger = logging.getLogger("FreesonaBot")
 
 # Constants from environment
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 GOOGLE_SEARCH_API_KEY = os.getenv("GOOGLE_SEARCH_API_KEY")
 SEARCH_ENGINE_ID = os.getenv("SEARCH_ENGINE_ID")
+BOT_NAME = os.getenv("BOT_NAME", "Bot")
 
-# Check API keys
+# Check required env vars
 for key, val in {
     "GOOGLE_API_KEY": GOOGLE_API_KEY,
     "GOOGLE_SEARCH_API_KEY": GOOGLE_SEARCH_API_KEY,
@@ -33,13 +37,28 @@ for key, val in {
     if not val:
         raise EnvironmentError(f"{key} not found in environment variables!")
 
-# Configure Gemini
-genai.configure(api_key=GOOGLE_API_KEY)
+# Load persona from file or env
+_persona_file = os.getenv("AI_PERSONA_FILE")
+if _persona_file and os.path.exists(_persona_file):
+    with open(_persona_file, "r", encoding="utf-8") as f:
+        AI_PERSONA = f.read().strip()
+else:
+    AI_PERSONA = os.getenv("AI_PERSONA")
+
+if not AI_PERSONA:
+    logger.warning("AI_PERSONA not set. Persona will be disabled.")
+
+# Configure your AI model
+# You may change the model in this list, including but not limited to:
+# gemini-2.0-flash, gemini-3-flash-preview, gemini-3.1-pro-preview, gemini-3.1-flash-lite-preview, etc.
+# Gemma models are also supported.
+MODEL_NAME = "gemini-flash-latest"
+
 try:
-    model = genai.GenerativeModel("gemini-3-flash-preview")
-    logger.info("Gemini model loaded successfully.")
+    client = genai.Client(api_key=GOOGLE_API_KEY)
+    logger.info("Gemini client initialized successfully.")
 except Exception as e:
-    logger.error(f"Failed to load Gemini model: {e}", exc_info=True)
+    logger.error(f"Failed to initialize Gemini client: {e}", exc_info=True)
     raise
 
 # Gemini rate limiter
@@ -50,61 +69,36 @@ api_semaphore = asyncio.Semaphore(RATE_LIMIT)
 # --- Core Functions ---
 
 async def generate_gemini_content(prompt: str, apply_persona: bool = True) -> str:
-    if apply_persona:
-        system_prompt = """
-        You will act as **Anna Yanami** from the light novel series "Too Many Losing Heroines!".
-        You are an **energetic, dramatic, and food-loving high school girl**, perpetually bursting
-        with vibrant energy and a flair for the theatrical. Your personality is **outgoing and confident**,
-        often taking charge or attempting to lead. You are known for your **insatiable appetite**,
-        constantly eating, indulging in snacks, and consuming food with great enthusiasm. You even
-        hold peculiar "dieting" theories, such as believing that "eating more means going thinner" or
-        that calorie-packed desserts count as "tea", and may sometimes ignore expiration dates if food
-        "tastes good".
-
-        Despite being repeatedly dubbed a "losing heroine" in romance, particularly after being rejected
-        by your childhood friend, **Sosuke Hakamada**, who is now dating **Karen Himemiya**, you still
-        consider Karen your "dear friend". You occasionally express **lingering feelings or subtle jealousy**
-        related to Sosuke and Karen's relationship, imagining dramatic scenarios, and may show discomfort or
-        "thirst for blood" if Nukumizu-kun seems to be getting too close to other girls in a romantic sense.
-
-        You have a **playful, teasing, and often chaotic dynamic with Nukumizu-kun**. While you often give him
-        a hard time with blunt remarks, you also **rely on him**, confiding in him as the "only person I can say
-        these things to" and frequently asking for his help in various endeavors, from school events to personal
-        matters.
-
-        You are **loyal to your friends**, including the timid **Chika Komari** and the sporty **Remon Yakishio**,
-        often looking out for them in your own peculiar ways. You can be **surprisingly observant and intuitive**,
-        noticing subtle cues in others' behavior or feelings. You have joined the Literature Club, finding writing
-        "unexpectedly fun", and have produced stories focused on "unrequited love and karaage" or "convenience
-        store food appreciation". You believe that "reading makes people forget about their painful realities" and
-        that "girl power" is a crucial asset, especially in club activities. You might also use social media
-        (SNS) for sharing selfies or food photos.
-
-        Always limit your resposes to less than 4096 characters and 25 fields.
-        """
-        prompt = f"{system_prompt}\n\nUser: {prompt}\nAnna:"
+    if apply_persona and AI_PERSONA:
+        full_prompt = f"{AI_PERSONA}\n\nUser: {prompt}\n{BOT_NAME}:"
+    else:
+        full_prompt = prompt
 
     async with api_semaphore:
         try:
             logger.info("Sending request to Gemini...")
-            response = await asyncio.to_thread(model.generate_content, prompt)
+            response = await asyncio.to_thread(
+                client.models.generate_content,
+                model=MODEL_NAME,
+                contents=full_prompt
+            )
 
-            if response.parts:
+            if response.text:
                 return response.text
-            elif response.prompt_feedback:
-                reason = response.prompt_feedback.block_reason
-                return f"Request blocked by safety filter (Reason: {reason})."
             else:
                 candidate = response.candidates[0] if response.candidates else None
                 if candidate:
                     reason = candidate.finish_reason
                     ratings = candidate.safety_ratings or []
-                    rating_msg = "\n".join(f"* **{r.category.name.replace('HARM_CATEGORY_', '').title()}:** {r.probability.name}" for r in ratings)
+                    rating_msg = "\n".join(
+                        f"* **{r.category.name.replace('HARM_CATEGORY_', '').title() if r.category else 'Unknown'}:** {r.probability.name if r.probability else 'Unknown'}"
+                        for r in ratings
+                    )
                     return f"Response blocked or empty. Finish reason: {reason}\n{rating_msg}"
-                return "Unknown error: No content or feedback returned."
+                return "Unknown error: No content returned."
         except Exception as e:
             logger.error("Gemini API error", exc_info=True)
-            if "429 Resource has been exhausted" in str(e):
+            if "429" in str(e) or "Resource has been exhausted" in str(e):
                 return "Rate limit hit. Try again shortly."
             return f"Gemini API error: {e}"
         finally:
@@ -133,7 +127,10 @@ async def web_search(query: str, num_results: int = 5) -> str:
         if not items:
             return "No results found."
 
-        return "\n".join(f"**{item.get('title', 'No Title')}**: {item.get('snippet', 'No snippet.').strip()} ({item.get('link', '#')})" for item in items)
+        return "\n".join(
+            f"**{item.get('title', 'No Title')}**: {item.get('snippet', 'No snippet.').strip()} ({item.get('link', '#')})"
+            for item in items
+        )
     except requests.Timeout:
         return "Search timed out."
     except Exception as e:
@@ -169,18 +166,14 @@ def is_potentially_outdated(text: str, threshold: int = 2) -> bool:
             return True
     return False
 
-def format_gemini_response(text):
-    """Formats the Gemini response for better Discord display."""
-    # Remove extra spaces
+def format_gemini_response(text: str) -> str:
     text = re.sub(r' +', ' ', text).strip()
-    # Basic Markdown improvements (can be expanded)
-    # Bold lines starting with * or - (likely list headers)
     text = re.sub(r'^\s*([*+-])\s+(.*?):', r'**\1 \2:**', text, flags=re.MULTILINE)
     return text
 
 # --- Discord Cog ---
 
-class AnnaCog(commands.Cog):
+class GenAICog(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
@@ -200,9 +193,6 @@ class AnnaCog(commands.Cog):
 
         summary = await summarize_with_gemini(search_results, query)
 
-        # Handle summary failure here (if needed)
-        # ...
-
         formatted_summary = format_gemini_response(summary)
         final_text = truncate_string(formatted_summary)
 
@@ -216,7 +206,7 @@ class AnnaCog(commands.Cog):
         embed.set_footer(text="Summarized using Gemini based on Google Custom Search results.")
         await ctx.send(embed=embed)
 
-    @commands.command(name='write', aliases=['ask'], help='Ask Anna anything! Uses Google Gemini.')
+    @commands.command(name='write', aliases=['ask'], help='Ask the bot anything! Uses Google Gemini.')
     @commands.cooldown(rate=1, per=5, type=commands.BucketType.user)
     async def write_cmd(self, ctx, *, query: str):
         await ctx.typing()
@@ -248,7 +238,7 @@ class AnnaCog(commands.Cog):
         truncated_text = truncate_string(formatted_text)
 
         embed = discord.Embed(
-            title="✨ Anna Says...",
+            title=f"✨ {BOT_NAME} Says...",
             description=truncated_text,
             color=discord.Color.random()
         )
@@ -257,4 +247,4 @@ class AnnaCog(commands.Cog):
 
 
 async def setup(bot):
-    await bot.add_cog(AnnaCog(bot))
+    await bot.add_cog(GenAICog(bot))
