@@ -8,7 +8,7 @@
 # datetime: Manages time-related tasks like cooldowns.
 # logging: Records events and errors for debugging.
 # requests: Handles HTTP requests for features like web search.
-# google.generativeai: Connects to the Gemini API for AI responses.
+# google-genai: Connects to the Gemini API for AI responses.
 # urllib.parse: Encodes URLs, used in search functionality.
 # fastapi: Async web framework for building APIs.
 # uvicorn: ASGI server required to run FastAPI apps and handle HTTP requests.
@@ -16,6 +16,6 @@
 discord.py
 python-dotenv
 requests
-google-generativeai
+google-genai
 fastapi
 uvicorn
