@@ -8,7 +8,7 @@ import uvicorn
 from fastapi_server import app
 from dotenv import load_dotenv
 
-load_dotenv(os.path.join(os.path.dirname(__file__), "actual.env"))
+load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
 
 bot_token = os.getenv("BOT_TOKEN")
 channel_id_str = os.getenv("CHANNEL_ID")
