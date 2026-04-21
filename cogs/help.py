@@ -28,20 +28,26 @@ class HelpCog(commands.Cog):
             fun_cmds = []
             mod_cmds = []
             util_cmds = []
+            media_cmds = []
 
             for cmd in self.bot.commands:
                 if cmd.hidden:
                     continue
 
+                # Category Mapping
                 if cmd.name in ['hello', 'write', 'ask', 'today']:
                     fun_cmds.append(f"`{prefix}{cmd.name}` - {cmd.help or 'No description'}")
                 elif cmd.name in ['kick', 'purge', 'removetimeout', 'rt', 'timeout', 'ban']:
                     mod_cmds.append(f"`{prefix}{cmd.name}` - {cmd.help or 'No description'}")
                 elif cmd.name in ['math', 'search', 'help']:
                     util_cmds.append(f"`{prefix}{cmd.name}` - {cmd.help or 'No description'}")
+                elif cmd.name in ['download', 'audio']:
+                    media_cmds.append(f"`{prefix}{cmd.name}` - {cmd.help or 'No description'}")
 
             if fun_cmds:
                 embed.add_field(name="🎉 Fun & Info", value="\n".join(fun_cmds), inline=False)
+            if media_cmds:
+                embed.add_field(name="📥 Media", value="\n".join(media_cmds), inline=False)
             if mod_cmds:
                 embed.add_field(name="🛡️ Moderation", value="\n".join(mod_cmds), inline=False)
             if util_cmds:
@@ -81,7 +87,7 @@ class HelpCog(commands.Cog):
                     cd = command._buckets._cooldown
                     embed.add_field(name="Cooldown", value=f"{cd.rate} time(s) per {cd.per:.0f} seconds", inline=False)
 
-                # Permissions info (basic)
+                # Permissions info
                 perm_names = []
                 checks = getattr(command.callback, '__commands_checks__', [])
                 for check in checks:

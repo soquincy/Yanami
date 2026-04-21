@@ -20,7 +20,6 @@ class Cobalt(commands.Cog):
     async def fetch_cobalt(self, url: str, is_audio: bool = False):
         random.shuffle(self.instances)
         
-        # Build payload based on v7 API specs
         payload = {
             "url": url,
             "filenameStyle": "nerdy",
@@ -28,7 +27,6 @@ class Cobalt(commands.Cog):
             "alwaysProxy": True
         }
 
-        # videoQuality MUST be removed for audio requests or instances may error
         if not is_audio:
             payload["videoQuality"] = "720"
 
@@ -40,18 +38,26 @@ class Cobalt(commands.Cog):
         
         timeout = aiohttp.ClientTimeout(total=20)
         for api_base in self.instances:
-            print(f"[Cobalt] Requesting {'audio' if is_audio else 'video'} via {api_base}")
             try:
                 async with aiohttp.ClientSession(timeout=timeout) as session:
                     async with session.post(f"{api_base}/", json=payload, headers=headers) as res:
                         if res.status == 200:
                             data = await res.json()
+                            status = data.get("status")
+
+                            # Handle TikTok/Insta "picker" (SD vs HD vs Audio choices)
+                            if status == "picker":
+                                items = data.get("picker", [])
+                                if items:
+                                    # Filter for items that have a URL and pick the first one
+                                    picker_url = items[0].get("url")
+                                    if picker_url:
+                                        return picker_url, api_base
+                            
+                            # Handle standard direct redirect/tunnel
                             if data.get("url"):
                                 return data.get("url"), api_base
-                        else:
-                            print(f"[Cobalt] {api_base} error: {res.status}")
-            except Exception as e:
-                print(f"[Cobalt] {api_base} connection failed: {e}")
+            except Exception:
                 continue
         return None, None
 
@@ -62,7 +68,7 @@ class Cobalt(commands.Cog):
             file_url, instance_url = await self.fetch_cobalt(url, is_audio)
             
             if not file_url:
-                return await ctx.send("❌ Could not get a download link. The API instances might be busy or blocked.")
+                return await ctx.send("❌ Could not get a download link. The instance might be blocked or the link is invalid.")
 
             instance_name = urlparse(instance_url).netloc
             ext = "mp3" if is_audio else "mp4"
@@ -74,16 +80,17 @@ class Cobalt(commands.Cog):
                     async with aiohttp.ClientSession() as session:
                         async with session.get(file_url) as resp:
                             if resp.status != 200:
-                                return await ctx.send("❌ Failed to download the file from the provider.")
+                                return await ctx.send("❌ Failed to download from provider.")
                             
                             content_length = resp.headers.get('Content-Length')
-                            limit = 10 * 1024 * 1024 # 10MB Discord Free Limit
+                            limit = 10 * 1024 * 1024 # 10MB Discord limit
 
                             if content_length and int(content_length) > limit:
                                 elapsed = time.perf_counter() - start_time
+                                # ADDED < > AROUND file_url TO SUPPRESS EMBED
                                 return await ctx.send(
-                                    f"✅ **{'Audio' if is_audio else 'Video'} Found:** Took {elapsed:.2f}s. Download [here]({file_url})\n"
-                                    f"-# File is too large for Discord upload ({int(content_length)//1024//1024}MB)\n"
+                                    f"✅ **{'Audio' if is_audio else 'Video'} Found:** Took {elapsed:.2f}s. Download [here](<{file_url}>)\n"
+                                    f"-# File exceeds Discord's 10MB limit ({int(content_length)//1024//1024}MB)\n"
                                     f"-# downloaded from [{instance_name}]({instance_url})"
                                 )
 
@@ -91,8 +98,9 @@ class Cobalt(commands.Cog):
                                 f.write(await resp.read())
 
                     total_elapsed = time.perf_counter() - start_time
+                    # ADDED < > AROUND file_url TO SUPPRESS EMBED
                     content = (
-                        f"✅ **{'Audio' if is_audio else 'Video'} Downloaded:** Took {total_elapsed:.2f}s. Download [here]({file_url})\n"
+                        f"✅ **{'Audio' if is_audio else 'Video'} Downloaded:** Took {total_elapsed:.2f}s. Download [here](<{file_url}>)\n"
                         f"-# downloaded from [{instance_name}]({instance_url})"
                     )
 

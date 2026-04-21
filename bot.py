@@ -30,7 +30,7 @@ intents.members = True
 intents.dm_messages = True
 intents.guilds = True
 
-bot = commands.Bot(command_prefix="~", intents=intents)
+bot = commands.Bot(command_prefix=",", intents=intents)
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s:%(levelname)s:%(name)s: %(message)s')
 logger = logging.getLogger(__name__)
