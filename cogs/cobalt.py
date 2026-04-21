@@ -110,10 +110,12 @@ class Cobalt(commands.Cog):
                     await ctx.send(f"❌ Error processing upload: `{e}`")
 
     @commands.command(name='download', aliases=['dl'], help='Downloads videos via cobalt.tools instances.')
+    @commands.cooldown(1, 30, commands.BucketType.user) # 1 use every 30 seconds per user
     async def download_video(self, ctx, url: str):
         await self.handle_download(ctx, url, is_audio=False)
 
     @commands.command(name='audio', aliases=['mp3'], help='Downloads media to audio via cobalt.tools instances.')
+    @commands.cooldown(1, 30, commands.BucketType.user) # 1 use every 30 seconds per user
     async def download_audio(self, ctx, url: str):
         await self.handle_download(ctx, url, is_audio=True)
 
