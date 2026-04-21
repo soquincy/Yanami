@@ -8,7 +8,7 @@ import uvicorn
 from fastapi_server import app
 from dotenv import load_dotenv
 
-load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
+load_dotenv(os.path.join(os.path.dirname(__file__), "actual.env"))
 
 bot_token = os.getenv("BOT_TOKEN")
 channel_id_str = os.getenv("CHANNEL_ID")
@@ -38,18 +38,20 @@ logger = logging.getLogger(__name__)
 
 @bot.event
 async def on_ready():
-    # bot.user is guaranteed non-None inside on_ready
     user = bot.user
     if user is None:
         return
     logger.info(f"Logged in as {user} (ID: {user.id})")
 
+    # Get the name from .env
+    bot_name = os.getenv("BOT_NAME", "Bot") 
+
     channel = bot.get_channel(CHANNEL_ID)
-    # Narrow to only channels that support .send (Messageable excludes Forum/Category/PrivateChannel)
     if isinstance(channel, abc.Messageable):
         try:
+            # Use an f-string to inject the variable
             await channel.send(
-                "Heya! Anna here! My knowledge is mostly from early 2023. "
+                f"Heya! {bot_name} here! My knowledge is mostly from late 2025. "
                 "For fresh info, use `~search <query>`."
             )
         except Exception as e:
@@ -83,6 +85,7 @@ async def start_http():
 
 
 async def start_bot():
+    await bot.load_extension("cogs.cobalt")
     await bot.load_extension("cogs.hello")
     await bot.load_extension("cogs.help")
     await bot.load_extension("cogs.utils")

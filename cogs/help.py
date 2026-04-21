@@ -1,17 +1,25 @@
+import os
 import discord
 from discord.ext import commands
+
+from dotenv import load_dotenv
+
+# Load .env variables
+load_dotenv()
+# Constants from environment
+BOT_NAME = os.getenv("BOT_NAME", "Bot")
 
 class HelpCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
     @commands.command(name='help', help='Shows help information for commands.')
-    async def help_cmd(self, ctx, *, command_name: str = None):
+    async def help_cmd(self, ctx, *, command_name: str | None = None):
         prefix = self.bot.command_prefix
 
         if not command_name:
             embed = discord.Embed(
-                title="Anna's Command List!",
+                title=f"{BOT_NAME}'s Command List!", 
                 description=f"Use `{prefix}help <command_name>` for more details on a specific command.",
                 color=discord.Color.random()
             )
@@ -39,7 +47,7 @@ class HelpCog(commands.Cog):
             if util_cmds:
                 embed.add_field(name="🔧 Utility", value="\n".join(util_cmds), inline=False)
 
-            embed.set_footer(text="Remember, my knowledge is mostly from early 2025!")
+            embed.set_footer(text="Remember, my knowledge is mostly from late 2025!")
             await ctx.send(embed=embed)
 
         else:
