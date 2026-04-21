@@ -2,7 +2,7 @@
 
 [Discord](https://discord.gg/fEHw2e2zrW)
 
-Freesona is an energetic and slightly scatterbrained Discord bot built to be helpful while keeping things fun. Her knowledge is limited to early 2023, so for the latest information, use the `~search` command!
+Freesona is an energetic and slightly scatterbrained Discord bot built to be helpful while keeping things fun. Her knowledge is limited to late 2025, so for the latest information, use the `~search` command!
 
 ## Features
 
