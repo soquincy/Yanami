@@ -1,4 +1,4 @@
-# Freesona - Your Quirky Discord Bot
+# Freesona - The Discord Bot You Customize 
 
 [Discord](https://discord.gg/fEHw2e2zrW)
 
