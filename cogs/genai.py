@@ -1,18 +1,16 @@
-# genai.py: This is the cog for any AI-related tasks including search overviews.
-# This is ran with Google Gemini. If you dislike this feature, you may remove this cog in bot.py, line 73.
-
 import os
 import re
 import asyncio
 import logging
 import requests
+import discord
+import urllib.parse
 from datetime import timedelta, datetime
 from typing import Optional
 
-import discord
 from discord.ext import commands
+from discord import app_commands, ui
 from dotenv import load_dotenv
-import urllib.parse
 from google import genai
 
 # Load .env variables
@@ -22,154 +20,131 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger("FreesonaBot")
 
-# Constants from environment
+# --- Configuration & Paths ---
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 GOOGLE_SEARCH_API_KEY = os.getenv("GOOGLE_SEARCH_API_KEY")
 SEARCH_ENGINE_ID = os.getenv("SEARCH_ENGINE_ID")
 BOT_NAME = os.getenv("BOT_NAME", "Bot")
 
-# Check required env vars
-for key, val in {
-    "GOOGLE_API_KEY": GOOGLE_API_KEY,
-    "GOOGLE_SEARCH_API_KEY": GOOGLE_SEARCH_API_KEY,
-    "SEARCH_ENGINE_ID": SEARCH_ENGINE_ID
-}.items():
-    if not val:
-        raise EnvironmentError(f"{key} not found in environment variables!")
-
-# Load persona from file or env
-_persona_file = os.getenv("AI_PERSONA_FILE")
-if _persona_file and os.path.exists(_persona_file):
-    with open(_persona_file, "r", encoding="utf-8") as f:
-        AI_PERSONA = f.read().strip()
-else:
-    AI_PERSONA = os.getenv("AI_PERSONA")
-
-if not AI_PERSONA:
-    logger.warning("AI_PERSONA not set. Persona will be disabled.")
-
-# Configure your AI model
-# You may change the model in this list, including but not limited to:
-# gemini-2.0-flash, gemini-3-flash-preview, gemini-3.1-pro-preview, gemini-3.1-flash-lite-preview, etc.
-# Gemma models are also supported.
+# Update this variable in Railway to /etc/secrets/persona.txt
+AI_PERSONA_PATH = os.getenv("AI_PERSONA_FILE", "/etc/secrets/persona.txt")
 MODEL_NAME = "gemini-flash-latest"
 
+# Ensure required keys exist
+if not GOOGLE_API_KEY:
+    raise EnvironmentError("GOOGLE_API_KEY is missing from environment variables.")
+
+# --- Persistence Logic ---
+
+def load_persona():
+    """Reads persona from volume; falls back to env var or default string."""
+    if os.path.exists(AI_PERSONA_PATH):
+        try:
+            with open(AI_PERSONA_PATH, "r", encoding="utf-8") as f:
+                content = f.read().strip()
+                if content:
+                    logger.info("Loaded persona from volume.")
+                    return content
+        except Exception as e:
+            logger.error(f"Error reading persona file: {e}")
+    
+    logger.info("Persona file not found or empty. Using fallback.")
+    return os.getenv("AI_PERSONA", "You are a helpful assistant.")
+
+# Live variable used by the AI
+CURRENT_PERSONA = load_persona()
+
+# --- Gemini Client ---
 try:
     client = genai.Client(api_key=GOOGLE_API_KEY)
     logger.info("Gemini client initialized successfully.")
 except Exception as e:
-    logger.error(f"Failed to initialize Gemini client: {e}", exc_info=True)
+    logger.error(f"Failed to initialize Gemini: {e}")
     raise
 
-# Gemini rate limiter
-RATE_LIMIT = 5
-RATE_LIMIT_PERIOD = 60
-api_semaphore = asyncio.Semaphore(RATE_LIMIT)
+# Rate limiter (5 requests per minute)
+api_semaphore = asyncio.Semaphore(5)
 
-# --- Core Functions ---
+# --- UI Components ---
+
+class PersonaModal(ui.Modal, title='Update AI Persona'):
+    """Pop-up editor for the bot's personality."""
+    persona_input = ui.TextInput(
+        label='Instructions (Saved to Volume)',
+        style=discord.TextStyle.paragraph,
+        placeholder='e.g. You are a helpful assistant that speaks in short sentences.',
+        required=True,
+        max_length=2000,
+    )
+
+    def __init__(self):
+        super().__init__()
+        self.persona_input.default = CURRENT_PERSONA
+
+    async def on_submit(self, interaction: discord.Interaction):
+        global CURRENT_PERSONA
+        new_persona = self.persona_input.value
+        
+        # Update the live memory
+        CURRENT_PERSONA = new_persona
+        
+        # Save to the Railway Volume
+        try:
+            # This 'w' mode creates the file automatically if it doesn't exist
+            with open(AI_PERSONA_PATH, "w", encoding="utf-8") as f:
+                f.write(new_persona)
+            
+            await interaction.response.send_message(
+                f"✅ **Persona updated!** Changes saved to `{AI_PERSONA_PATH}`.", 
+                ephemeral=True
+            )
+            logger.info(f"Persona updated and saved to volume by {interaction.user}")
+        except Exception as e:
+            await interaction.response.send_message(
+                f"❌ **Failed to save to volume:** {e}", 
+                ephemeral=True
+            )
+            logger.error(f"File write error: {e}")
+
+# --- Core AI Logic ---
 
 async def generate_gemini_content(prompt: str, apply_persona: bool = True) -> str:
-    if apply_persona and AI_PERSONA:
-        full_prompt = f"{AI_PERSONA}\n\nUser: {prompt}\n{BOT_NAME}:"
+    global CURRENT_PERSONA
+    
+    if apply_persona and CURRENT_PERSONA:
+        full_prompt = f"{CURRENT_PERSONA}\n\nUser: {prompt}\n{BOT_NAME}:"
     else:
         full_prompt = prompt
 
     async with api_semaphore:
         try:
-            logger.info("Sending request to Gemini...")
             response = await asyncio.to_thread(
                 client.models.generate_content,
                 model=MODEL_NAME,
                 contents=full_prompt
             )
-
-            if response.text:
-                return response.text
-            else:
-                candidate = response.candidates[0] if response.candidates else None
-                if candidate:
-                    reason = candidate.finish_reason
-                    ratings = candidate.safety_ratings or []
-                    rating_msg = "\n".join(
-                        f"* **{r.category.name.replace('HARM_CATEGORY_', '').title() if r.category else 'Unknown'}:** {r.probability.name if r.probability else 'Unknown'}"
-                        for r in ratings
-                    )
-                    return f"Response blocked or empty. Finish reason: {reason}\n{rating_msg}"
-                return "Unknown error: No content returned."
+            return response.text if response.text else "The AI returned an empty response."
         except Exception as e:
-            logger.error("Gemini API error", exc_info=True)
-            if "429" in str(e) or "Resource has been exhausted" in str(e):
-                return "Rate limit hit. Try again shortly."
-            return f"Gemini API error: {e}"
-        finally:
-            await asyncio.sleep(RATE_LIMIT_PERIOD / RATE_LIMIT)
+            logger.error(f"Gemini API error: {e}")
+            return f"Error: {e}"
 
-async def web_search(query: str, num_results: int = 5) -> str:
+async def web_search(query: str) -> str:
     url = "https://www.googleapis.com/customsearch/v1"
     params = {
-        "key": GOOGLE_SEARCH_API_KEY,
-        "cx": SEARCH_ENGINE_ID,
-        "q": query,
-        "num": num_results
+        "key": GOOGLE_SEARCH_API_KEY, 
+        "cx": SEARCH_ENGINE_ID, 
+        "q": query, 
+        "num": 5
     }
-
     try:
-        logger.info(f"Searching Google for: {query}")
         response = await asyncio.to_thread(requests.get, url, params=params, timeout=10)
-        response.raise_for_status()
         data = response.json()
-
-        if "error" in data:
-            msg = data["error"].get("message", "Unknown error.")
-            return f"Search API error: {msg}"
-
         items = data.get("items", [])
-        if not items:
-            return "No results found."
-
-        return "\n".join(
-            f"**{item.get('title', 'No Title')}**: {item.get('snippet', 'No snippet.').strip()} ({item.get('link', '#')})"
-            for item in items
-        )
-    except requests.Timeout:
-        return "Search timed out."
+        if not items: return "No results."
+        return "\n".join([f"- {i['title']}: {i['snippet']} ({i['link']})" for i in items])
     except Exception as e:
-        logger.error("Web search error", exc_info=True)
-        return f"Search failed: {e}"
-
-async def summarize_with_gemini(results: str, query: str) -> str:
-    prompt = f"Based *only* on the following search results, summarize this query: '{query}'\n\nResults:\n{results}\n\nSummary:"
-    return await generate_gemini_content(prompt, apply_persona=False)
-
-def format_response(text: str) -> str:
-    text = re.sub(r" +", " ", text).strip()
-    return re.sub(r"^\s*([*+-])\s+(.*?):", r"**\1 \2:**", text, flags=re.MULTILINE)
-
-def truncate_string(text: str, max_len: int = 1950) -> str:
-    return text[:max_len] + "..." if len(text) > max_len else text
-
-def parse_time_string(time_str: str) -> Optional[timedelta]:
-    match = re.fullmatch(r"(\d+)([smhd])", time_str.lower())
-    if not match:
-        return None
-    value, unit = int(match[1]), match[2]
-    unit_map = {"s": "seconds", "m": "minutes", "h": "hours", "d": "days"}
-    kwargs = {unit_map[unit]: value}
-    return timedelta(**kwargs)
-
-def is_potentially_outdated(text: str, threshold: int = 2) -> bool:
-    current_year = datetime.now().year
-    for year_match in re.finditer(r"\b(19\d{2}|20\d{2})\b", text):
-        year = int(year_match.group(1))
-        if current_year - year >= threshold:
-            logger.info(f"Outdated year detected: {year}")
-            return True
-    return False
-
-def format_gemini_response(text: str) -> str:
-    text = re.sub(r' +', ' ', text).strip()
-    text = re.sub(r'^\s*([*+-])\s+(.*?):', r'**\1 \2:**', text, flags=re.MULTILINE)
-    return text
+        logger.error(f"Search error: {e}")
+        return "Search service unavailable."
 
 # --- Discord Cog ---
 
@@ -177,57 +152,47 @@ class GenAICog(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
-    @commands.hybrid_command(name='search', help='Searches the web using Google Search.')
-    @commands.cooldown(rate=1, per=10, type=commands.BucketType.user)
+    @commands.hybrid_command(name='setpersona', help='Update the bots personality (Owner only).')
+    @commands.is_owner()
+    async def set_persona(self, ctx):
+        """Opens a modal to change the bot's system instructions."""
+        if ctx.interaction:
+            await ctx.interaction.response.send_modal(PersonaModal())
+        else:
+            await ctx.send("Please use the slash command `/setpersona` to open the editor.")
+
+    @commands.hybrid_command(name='write', aliases=['ask'], help='Ask the AI anything.')
+    @app_commands.describe(query="Your question or prompt for the AI.")
+    async def write_cmd(self, ctx, *, query: str):
+        await ctx.defer()
+        
+        response_text = await generate_gemini_content(query)
+        
+        embed = discord.Embed(
+            title=f"✨ {BOT_NAME}",
+            description=response_text[:4000],
+            color=discord.Color.brand_green()
+        )
+        embed.set_footer(text=f"Asked by {ctx.author}", icon_url=ctx.author.display_avatar.url)
+        await ctx.send(embed=embed)
+
+    @commands.hybrid_command(name='search', help='Search Google and summarize with AI.')
+    @app_commands.describe(query="The topic you want to research.")
     async def search_cmd(self, ctx, *, query: str):
-        # Mandatory for slash commands to prevent 3s timeout
-        await ctx.defer() 
-
-        search_results = await web_search(query, num_results=5)
-
-        if search_results == "No relevant results found." or \
-           "error" in search_results.lower() or \
-           "timed out" in search_results.lower():
-            error_reason = f" ({search_results})" if "error" in search_results.lower() else ""
-            await ctx.send(f"Couldn't find useful results for '{query}'{error_reason}.")
-            return
-
-        summary = await summarize_with_gemini(search_results, query)
-        formatted_summary = format_gemini_response(summary)
-        final_text = truncate_string(formatted_summary)
+        await ctx.defer()
+        
+        results = await web_search(query)
+        summary_prompt = f"Summarize these search results for the query '{query}':\n\n{results}"
+        summary = await generate_gemini_content(summary_prompt, apply_persona=False)
 
         embed = discord.Embed(
-            title=f"🔎 Google Search Summary for '{query}'",
-            description=final_text,
+            title=f"🔎 Search Results: {query}",
+            description=summary[:4000],
             color=discord.Color.blue()
         )
-        google_search_link = f"https://www.google.com/search?q={urllib.parse.quote(query)}"
-        embed.add_field(name="Search Link", value=f"[View on Google]({google_search_link})", inline=False)
-        embed.set_footer(text="Summarized using Gemini based on Google Custom Search results.")
-        
+        search_url = f"https://www.google.com/search?q={urllib.parse.quote(query)}"
+        embed.add_field(name="Sources", value=f"[View Google Search]({search_url})")
         await ctx.send(embed=embed)
-
-    @commands.hybrid_command(name='write', aliases=['ask'], help='Ask the bot anything! Uses Google Gemini.')
-    @commands.cooldown(rate=1, per=5, type=commands.BucketType.user)
-    async def write_cmd(self, ctx, *, query: str):
-        # Mandatory for slash commands
-        await ctx.defer() 
-        
-        initial_response_text = await generate_gemini_content(query, apply_persona=True)
-
-        # ... rest of your logic remains the same ...
-        # (The search_fallback parts will work fine because of the initial defer)
-        
-        # [Existing logic for fallback and formatting]
-
-        embed = discord.Embed(
-            title=f"✨ {BOT_NAME} Says...",
-            description=truncated_text,
-            color=discord.Color.random()
-        )
-        embed.set_footer(text=f"Asked by {ctx.author.display_name}", icon_url=ctx.author.display_avatar.url)
-        await ctx.send(embed=embed)
-
 
 async def setup(bot):
     await bot.add_cog(GenAICog(bot))
