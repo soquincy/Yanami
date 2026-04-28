@@ -108,13 +108,13 @@ class YtDlp(commands.Cog):
                     file=discord.File(local_path)
                 )
 
-    @commands.hybrid_command(name="download", description="Download a video (1080p/720p/480p/Compressed)")
+    @commands.hybrid_command(name="download", alias="dl", description="Download a video (1080p/720p/480p/Compressed)")
     @app_commands.describe(url="The URL of the video to download")
     @commands.cooldown(1, 30, commands.BucketType.user)
     async def download_video(self, ctx, url: str):
         await self.handle_download(ctx, url, is_audio=False)
 
-    @commands.hybrid_command(name="audio", description="Download video as an MP3")
+    @commands.hybrid_command(name="audio", alias="mp3", description="Download video as an MP3")
     @app_commands.describe(url="The URL of the audio to download")
     @commands.cooldown(1, 30, commands.BucketType.user)
     async def download_audio(self, ctx, url: str):

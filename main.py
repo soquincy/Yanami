@@ -5,31 +5,43 @@ import os
 import logging
 import asyncio
 import uvicorn
+import json
 from fastapi_server import app
 from dotenv import load_dotenv
 
 load_dotenv(os.path.join(os.path.dirname(__file__), "actual.env"))
 
+# --- Configuration & Persistence Setup ---
 bot_token = os.getenv("BOT_TOKEN")
 channel_id_str = os.getenv("CHANNEL_ID")
+# Use /etc/secrets/config.json if in cloud, otherwise local config.json
+CONFIG_PATH = os.getenv("CONFIG_FILE_PATH", "config.json")
 
 if not bot_token or not channel_id_str:
     raise ValueError("Missing BOT_TOKEN or CHANNEL_ID in environment variables")
 
-bot_token = str(bot_token)
-
 try:
     CHANNEL_ID = int(channel_id_str)
 except ValueError:
-    raise ValueError("CHANNEL_ID environment variable must be an integer")
+    raise ValueError("CHANNEL_ID must be an integer")
 
-# Define the Bot Class to handle setup and syncing
+def get_prefix(bot, message):
+    """Reads the prefix from the persistent JSON file."""
+    try:
+        if os.path.exists(CONFIG_PATH):
+            with open(CONFIG_PATH, "r") as f:
+                data = json.load(f)
+                return data.get("prefix", "~")
+    except (FileNotFoundError, json.JSONDecodeError):
+        pass
+    return "~"
+
+# --- Bot Class Definition ---
 class Freesona(commands.Bot):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
     async def setup_hook(self):
-        # List of your extensions
         extensions = [
             "cogs.ytdlp", "cogs.hello", "cogs.help", 
             "cogs.utils", "cogs.genai", "cogs.wolfram", "cogs.status"
@@ -37,62 +49,58 @@ class Freesona(commands.Bot):
         for ext in extensions:
             await self.load_extension(ext)
         
-        # Syncing slash commands globally
         await self.tree.sync()
         print(f"Synced slash commands for {self.user}")
 
+# Initialize Bot
 intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True
 intents.dm_messages = True
 intents.guilds = True
 
-# Initialize using the new class
-bot = Freesona(command_prefix="~", intents=intents)
+bot = Freesona(command_prefix=get_prefix, intents=intents)
 bot.remove_command('help')
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s:%(levelname)s:%(name)s: %(message)s')
 logger = logging.getLogger(__name__)
 
+# --- Commands & Events ---
+
+@bot.command(name="prefix")
+@commands.has_permissions(administrator=True)
+async def change_prefix(ctx, new_prefix: str):
+    """Changes the bot prefix and saves it to /etc/secrets/config.json"""
+    try:
+        with open(CONFIG_PATH, "w") as f:
+            json.dump({"prefix": new_prefix}, f)
+        await ctx.send(f"Prefix updated to: `{new_prefix}`")
+    except Exception as e:
+        logger.error(f"Failed to save prefix: {e}")
+        await ctx.send("Error saving prefix to persistent storage.")
+
 @bot.event
 async def on_ready():
     print(f'Logged in as {bot.user}')
     try:
-        # This syncs commands globally. 
-        # Note: Global sync can take up to an hour to propagate.
         synced = await bot.tree.sync()
         print(f"Synced {len(synced)} command(s)")
     except Exception as e:
         print(f"Error syncing tree: {e}")
 
-    user = bot.user
-    if user is None: return
-    logger.info(f"Logged in as {user} (ID: {user.id})")
-
-    bot_name = os.getenv("BOT_NAME", "Bot") 
     channel = bot.get_channel(CHANNEL_ID)
     if isinstance(channel, abc.Messageable):
+        bot_name = os.getenv("BOT_NAME", "Bot")
         try:
+            current_p = get_prefix(bot, None)
             await channel.send(
-                f"Heya! {bot_name} here! My knowledge is mostly from late 2025. "
+                f"Heya! {bot_name} here! Current prefix is `{current_p}`. "
                 "For fresh info, use `~search <query>`."
             )
         except Exception as e:
             logger.warning(f"Failed to send startup message: {e}")
 
-        
-async def on_command_error(ctx, error):
-    if isinstance(error, commands.CommandNotFound):
-        await ctx.send("Unknown command. Try `~help`.")
-    elif isinstance(error, commands.MissingPermissions):
-        await ctx.send("You lack permissions to do that.")
-    elif isinstance(error, commands.MissingRequiredArgument):
-        await ctx.send(f"Missing argument `{error.param.name}`. See `~help {ctx.command}`.")
-    elif isinstance(error, commands.CommandOnCooldown):
-        await ctx.send(f"Cooldown active. Try again in {error.retry_after:.1f}s.")
-    else:
-        logger.error(f"Error in command {ctx.command}: {error}", exc_info=True)
-        await ctx.send("An error occurred. Please try again later.")
+# --- Background Tasks & Execution ---
 
 async def start_http():
     config = uvicorn.Config(app, host="0.0.0.0", port=10000, log_level="warning")
@@ -100,8 +108,7 @@ async def start_http():
     await server.serve()
 
 async def start_bot():
-    assert bot_token is not None
-    await bot.start(bot_token)
+    await bot.start(str(bot_token))
 
 async def main():
     await asyncio.gather(
