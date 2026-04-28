@@ -5,11 +5,16 @@ import os
 import tempfile
 import time
 
+def normalize_url(url: str) -> str:
+    if "music.youtube.com" in url:
+        url = url.replace("music.youtube.com", "www.youtube.com")
+    return url
+
 class YtDlp(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    async def fetch_ytdlp(self, url: str, is_audio: bool, tmp_dir: str) -> str | None:
+    async def fetch_ytdlp(self, ctx, url: str, is_audio: bool, tmp_dir: str) -> str | None:
         ext = "mp3" if is_audio else "mp4"
         limit = 10 * 1024 * 1024  # 10MB
 
@@ -17,69 +22,93 @@ class YtDlp(commands.Cog):
             output_path = os.path.join(tmp_dir, f"%(uploader)s – %(title)s.{ext}")
             cmd = [
                 "yt-dlp",
-                "-x", "--audio-format", "mp3", "--audio-quality", "0",
+                "-x", "--audio-format", "mp3", "--audio-quality", "5",
                 "-o", output_path,
                 "--no-playlist",
-                "--quiet",
+                "--verbose",
                 url,
             ]
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
             try:
-                proc = await asyncio.create_subprocess_exec(
-                    *cmd,
-                    stdout=asyncio.subprocess.DEVNULL,
-                    stderr=asyncio.subprocess.DEVNULL,
-                )
                 await asyncio.wait_for(proc.wait(), timeout=60)
-                if proc.returncode == 0:
-                    files = os.listdir(tmp_dir)
-                    if files:
-                        return os.path.join(tmp_dir, files[0])
-            except Exception:
-                pass
+            except asyncio.TimeoutError:
+                proc.kill()
+                await ctx.send("❌ yt-dlp timed out.")
+                return None
+
+            stdout, stderr = await proc.communicate()
+            stderr_text = stderr.decode("utf-8", errors="replace").strip()
+            if stderr_text:
+                print(stderr_text)
+
+            if proc.returncode != 0:
+                error_msg = stderr_text or "No error output."
+                await ctx.send(f"❌ yt-dlp failed (code {proc.returncode}):\n```\n{error_msg[:1800]}\n```")
+                return None
+
+            files = os.listdir(tmp_dir)
+            if files:
+                return os.path.join(tmp_dir, files[0])
             return None
 
         # Video: try qualities in order, stop at first one under 10MB
         for height in [1080, 480]:
-            # Clear tmp_dir between attempts
             for f in os.listdir(tmp_dir):
                 os.remove(os.path.join(tmp_dir, f))
 
-            output_path = os.path.join(tmp_dir, f"%(uploader)s – %(title)s.{ext}")
+            output_path = os.path.join(tmp_dir, f"%(uploader)s - %(title)s.{ext}")
             cmd = [
                 "yt-dlp",
                 "-f", f"bestvideo[height<={height}][ext=mp4]+bestaudio[ext=m4a]/best[height<={height}][ext=mp4]/best[height<={height}]",
                 "--merge-output-format", "mp4",
                 "-o", output_path,
                 "--no-playlist",
-                "--quiet",
+                "--verbose",
                 url,
             ]
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
             try:
-                proc = await asyncio.create_subprocess_exec(
-                    *cmd,
-                    stdout=asyncio.subprocess.DEVNULL,
-                    stderr=asyncio.subprocess.DEVNULL,
-                )
                 await asyncio.wait_for(proc.wait(), timeout=60)
-                if proc.returncode == 0:
-                    files = os.listdir(tmp_dir)
-                    if files:
-                        path = os.path.join(tmp_dir, files[0])
-                        if os.path.getsize(path) <= limit:
-                            return path
-            except Exception:
-                continue
+            except asyncio.TimeoutError:
+                proc.kill()
+                await ctx.send("❌ yt-dlp timed out.")
+                return None
+
+            stdout, stderr = await proc.communicate()
+            stderr_text = stderr.decode().strip()
+            if stderr_text:
+                print(stderr_text)
+
+            if proc.returncode != 0:
+                error_msg = stderr_text or "No error output."
+                await ctx.send(f"❌ yt-dlp failed (code {proc.returncode}):\n```\n{error_msg[:1800]}\n```")
+                return None
+
+            files = os.listdir(tmp_dir)
+            if files:
+                path = os.path.join(tmp_dir, files[0])
+                if os.path.getsize(path) <= limit:
+                    return path
 
         return None
 
     async def handle_download(self, ctx, url: str, is_audio: bool):
+        url = normalize_url(url)
         start_time = time.perf_counter()
         limit = 10 * 1024 * 1024  # 10MB
         kind = "Audio" if is_audio else "Video"
 
         async with ctx.typing():
             with tempfile.TemporaryDirectory() as tmp_dir:
-                local_path = await self.fetch_ytdlp(url, is_audio, tmp_dir)
+                local_path = await self.fetch_ytdlp(ctx, url, is_audio, tmp_dir)
 
                 if not local_path:
                     return await ctx.send(
