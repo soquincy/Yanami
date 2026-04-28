@@ -1,6 +1,7 @@
 import asyncio
 import discord
 from discord.ext import commands
+from discord import app_commands
 import os
 import tempfile
 import time
@@ -30,10 +31,8 @@ class YtDlp(commands.Cog):
             ]
             return await self.run_ytdlp(ctx, cmd, tmp_dir)
 
-        # Video logic: Iterate through resolutions to find one under 10MB
-        # We check 1080p, 720p, 480p, and 360p
+        # Video logic: Resolution iteration
         for height in [1080, 720, 480, 360]:
-            # Use --print to check estimated size first to save bandwidth
             check_cmd = [
                 "yt-dlp",
                 "--print", "%(filesize,filesize_approx)s",
@@ -47,11 +46,13 @@ class YtDlp(commands.Cog):
             stdout, _ = await check_proc.communicate()
             
             try:
-                size_str = stdout.decode().strip().split()[0]
-                if size_str.isdigit() and int(size_str) > self.limit:
-                    continue # Skip this resolution, too big
+                decoded = stdout.decode().strip().split()
+                if decoded:
+                    size_str = decoded[0]
+                    if size_str.isdigit() and int(size_str) > self.limit:
+                        continue 
             except (IndexError, ValueError):
-                pass # If size is unknown (NA), try downloading anyway
+                pass 
 
             output_path = os.path.join(tmp_dir, f"%(uploader)s - %(title)s_{height}p.{ext}")
             cmd = [
@@ -68,9 +69,11 @@ class YtDlp(commands.Cog):
             if path and os.path.getsize(path) <= self.limit:
                 return path
             
-            # Clean up failed/oversized attempts before next resolution
             for f in os.listdir(tmp_dir):
-                os.remove(os.path.join(tmp_dir, f))
+                try:
+                    os.remove(os.path.join(tmp_dir, f))
+                except:
+                    pass
 
         return None
 
@@ -92,35 +95,41 @@ class YtDlp(commands.Cog):
 
         files = os.listdir(tmp_dir)
         if files:
+            # Sort by size to pick the actual video file, not leftovers
+            files.sort(key=lambda x: os.path.getsize(os.path.join(tmp_dir, x)), reverse=True)
             return os.path.join(tmp_dir, files[0])
         return None
 
     async def handle_download(self, ctx, url: str, is_audio: bool):
+        # Critical for slash commands: tells Discord to wait up to 15 mins
+        await ctx.defer()
+        
         url = normalize_url(url)
         start_time = time.perf_counter()
         kind = "Audio" if is_audio else "Video"
 
-        async with ctx.typing():
-            with tempfile.TemporaryDirectory() as tmp_dir:
-                local_path = await self.fetch_ytdlp(ctx, url, is_audio, tmp_dir)
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            local_path = await self.fetch_ytdlp(ctx, url, is_audio, tmp_dir)
 
-                if not local_path:
-                    return await ctx.send(f"❌ {kind} too large for Discord (10MB limit) or link unavailable.")
+            if not local_path or not os.path.exists(local_path):
+                return await ctx.send(f"❌ {kind} too large for Discord (10MB limit) or link unavailable.")
 
-                elapsed = time.perf_counter() - start_time
-                size_mb = os.path.getsize(local_path) / (1024 * 1024)
+            elapsed = time.perf_counter() - start_time
+            size_mb = os.path.getsize(local_path) / (1024 * 1024)
 
-                await ctx.send(
-                    content=f"✅ **{kind} Downloaded** • {elapsed:.2f}s • {size_mb:.1f}MB",
-                    file=discord.File(local_path)
-                )
+            await ctx.send(
+                content=f"✅ **{kind} Downloaded** • {elapsed:.2f}s • {size_mb:.1f}MB",
+                file=discord.File(local_path)
+            )
 
-    @commands.command(name="download", aliases=["dl"])
+    @commands.hybrid_command(name="download", aliases=["dl"], help="Downloads video from a link (10MB limit).")
+    @app_commands.describe(url="The URL of the video to download.")
     @commands.cooldown(1, 30, commands.BucketType.user)
     async def download_video(self, ctx, url: str):
         await self.handle_download(ctx, url, is_audio=False)
 
-    @commands.command(name="audio", aliases=["mp3"])
+    @commands.hybrid_command(name="audio", aliases=["mp3"], help="Converts a video link to an MP3 file.")
+    @app_commands.describe(url="The URL of the video to convert to audio.")
     @commands.cooldown(1, 30, commands.BucketType.user)
     async def download_audio(self, ctx, url: str):
         await self.handle_download(ctx, url, is_audio=True)

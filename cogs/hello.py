@@ -4,7 +4,7 @@ class HelloCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    @commands.command(name='hello', help='Says hello back!')
+    @commands.hybrid_command(name='hello', help='Says hello back!')
     async def hello_cmd(self, ctx):
         await ctx.send(f"Hello {ctx.author.mention}!")
 

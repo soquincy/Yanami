@@ -1,7 +1,7 @@
 import os
 import discord
 from discord.ext import commands
-
+from discord import app_commands
 from dotenv import load_dotenv
 
 # Load .env variables
@@ -13,8 +13,12 @@ class HelpCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    @commands.command(name='help', help='Shows help information for commands.')
+    @commands.hybrid_command(name='help', help='Shows help information for commands.')
+    @app_commands.describe(command_name="The name of the command you want details for.")
     async def help_cmd(self, ctx, *, command_name: str | None = None):
+        # Mandatory defer for hybrid/slash commands
+        await ctx.defer()
+        
         prefix = self.bot.command_prefix
 
         if not command_name:
@@ -87,18 +91,20 @@ class HelpCog(commands.Cog):
                     cd = command._buckets._cooldown
                     embed.add_field(name="Cooldown", value=f"{cd.rate} time(s) per {cd.per:.0f} seconds", inline=False)
 
-                # Permissions info
+                # Permissions logic
                 perm_names = []
                 checks = getattr(command.callback, '__commands_checks__', [])
                 for check in checks:
                     if 'has_permissions' in str(check):
                         try:
+                            # Access the permissions via the closure
                             required_perms = [p for p, v in check.__closure__[0].cell_contents.items() if v]
                             perm_names.extend(p.replace('_', ' ').title() for p in required_perms)
                         except Exception:
                             pass
                     elif 'is_owner' in str(check):
                         perm_names.append("Bot Owner")
+                
                 if perm_names:
                     embed.add_field(name="Permissions", value=", ".join(perm_names), inline=False)
 

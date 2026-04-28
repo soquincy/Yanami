@@ -4,6 +4,7 @@ import logging
 import re
 import discord
 from discord.ext import commands
+from discord import app_commands
 from urllib.parse import quote
 
 WOLFRAM_SHORT_APPID = os.getenv("WOLFRAM_APPID_SHORT")
@@ -25,8 +26,7 @@ class WolframCog(commands.Cog):
         if "Input interpretation" in text:
             text = text[text.find("Input interpretation"):]
 
-        # 3. Improved Result Capture:
-        # This version captures the content until it hits another major section or the end.
+        # 3. Improved Result Capture
         text = re.sub(r'(?i)Result:\s*\n*(.+)', r'**Result:** `\1`', text)
         
         # 4. Clean up metadata URLs but keep text
@@ -50,18 +50,12 @@ class WolframCog(commands.Cog):
             color=0xDA5B40 
         )
 
-        # 1. Identify the math inside the backticks
+        # identify math for LaTeX image rendering
         math_match = re.search(r'\*\*Result:\*\*\s*`([^`]+)`', formatted_content)
         if math_match:
             raw_math = math_match.group(1)
-            
-            # 2. VALIDATION: Only use LaTeX if the result isn't just plain English
-            # We check for math symbols or digits. If it's just "the 1st is..." it skips image.
             if any(char in raw_math for char in '0123456789=+-*/^()√π∫'):
-                # Basic cleanup
                 latex_math = raw_math.replace('≈', r'\approx').replace('integral', r'\int')
-                
-                from urllib.parse import quote
                 encoded_math = quote(latex_math)
                 latex_url = fr"https://latex.codecogs.com/png.image?\dpi{{150}}\bg{{white}}{encoded_math}"
                 embed.set_image(url=latex_url)
@@ -69,30 +63,33 @@ class WolframCog(commands.Cog):
         embed.set_footer(text=f"Query: {query}")
         return embed
 
-    @commands.command(name="math", aliases=['wa', 'wolfram', 'mq'], help="Answers math queries.")
+    @commands.hybrid_command(name="math", aliases=['wa', 'wolfram', 'mq'], help="Answers math queries using Wolfram Alpha.")
+    @app_commands.describe(query="The math problem or question you want to solve.")
     async def math(self, ctx, *, query: str):
+        # Mandatory for slash commands
+        await ctx.defer()
+        
         logging.info(f"Processing query: {query}")
         
-        async with ctx.typing():
-            # Try short answer API first
-            short_result = await self.query_short_answer(query)
-            
-            if short_result and "did not understand" not in short_result.lower():
-                logging.info(f"Short API succeeded")
-                embed = self.create_embed("Wolfram Alpha Result", short_result, query)
-                await ctx.send(embed=embed)
-                return
-            
-            # If short answer fails, try full LLM API
-            full_result = await self.query_llm_api(query)
-            
-            if full_result:
-                logging.info(f"Full API succeeded")
-                embed = self.create_embed("Wolfram Alpha Result", full_result, query)
-                await ctx.send(embed=embed)
-            else:
-                logging.warning("Both APIs failed")
-                await ctx.send("Sorry, I couldn't find an answer to your query.")
+        # Try short answer API first
+        short_result = await self.query_short_answer(query)
+        
+        if short_result and "did not understand" not in short_result.lower():
+            logging.info(f"Short API succeeded")
+            embed = self.create_embed("Wolfram Alpha Result", short_result, query)
+            await ctx.send(embed=embed)
+            return
+        
+        # If short answer fails, try full LLM API
+        full_result = await self.query_llm_api(query)
+        
+        if full_result:
+            logging.info(f"Full API succeeded")
+            embed = self.create_embed("Wolfram Alpha Result", full_result, query)
+            await ctx.send(embed=embed)
+        else:
+            logging.warning("Both APIs failed")
+            await ctx.send("Sorry, I couldn't find an answer to your query.")
 
     async def query_short_answer(self, query: str) -> str | None:
         if not WOLFRAM_SHORT_APPID:
