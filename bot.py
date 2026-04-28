@@ -85,7 +85,7 @@ async def start_http():
 
 
 async def start_bot():
-    await bot.load_extension("cogs.cobalt")
+    await bot.load_extension("cogs.ytdlp")
     await bot.load_extension("cogs.hello")
     await bot.load_extension("cogs.help")
     await bot.load_extension("cogs.utils")

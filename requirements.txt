@@ -1,7 +1,7 @@
 # --- Required Modules --- #
 # discord.py: Interfaces with the Discord API.
 # discord.ext.commands: Provides tools to define and manage bot commands.
-# dotenv: Loads environment variables from a .env file.
+# python-dotenv: Loads environment variables from a .env file.
 # re: Handles text parsing via regular expressions.
 # os: Accesses system-level environment variables.
 # asyncio: Enables asynchronous operations.
@@ -12,6 +12,8 @@
 # urllib.parse: Encodes URLs, used in search functionality.
 # fastapi: Async web framework for building APIs.
 # uvicorn: ASGI server required to run FastAPI apps and handle HTTP requests.
+# aiohttp: Handles async HTTP requests, used in the Cobalt downloader cog.
+# yt-dlp: CLI tool for downloading YouTube/TikTok/Twitter videos.
 
 discord.py
 python-dotenv
@@ -19,3 +21,5 @@ requests
 google-genai
 fastapi
 uvicorn
+aiohttp
+yt-dlp
