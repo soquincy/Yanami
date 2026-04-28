@@ -19,7 +19,7 @@ class YtDlp(commands.Cog):
         limit = 10 * 1024 * 1024  # 10MB
 
         if is_audio:
-            output_path = os.path.join(tmp_dir, f"%(uploader)s – %(title)s.{ext}")
+            output_path = os.path.join(tmp_dir, f"%(uploader)s - %(title)s.{ext}")
             cmd = [
                 "yt-dlp",
                 "-x", "--audio-format", "mp3", "--audio-quality", "5",
