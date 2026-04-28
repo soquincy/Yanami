@@ -56,6 +56,15 @@ logger = logging.getLogger(__name__)
 
 @bot.event
 async def on_ready():
+    print(f'Logged in as {bot.user}')
+    try:
+        # This syncs commands globally. 
+        # Note: Global sync can take up to an hour to propagate.
+        synced = await bot.tree.sync()
+        print(f"Synced {len(synced)} command(s)")
+    except Exception as e:
+        print(f"Error syncing tree: {e}")
+
     user = bot.user
     if user is None: return
     logger.info(f"Logged in as {user} (ID: {user.id})")
@@ -71,16 +80,6 @@ async def on_ready():
         except Exception as e:
             logger.warning(f"Failed to send startup message: {e}")
 
-@bot.event
-async def on_ready():
-    print(f'Logged in as {bot.user}')
-    try:
-        # This syncs commands globally. 
-        # Note: Global sync can take up to an hour to propagate.
-        synced = await bot.tree.sync()
-        print(f"Synced {len(synced)} command(s)")
-    except Exception as e:
-        print(f"Error syncing tree: {e}")
         
 async def on_command_error(ctx, error):
     if isinstance(error, commands.CommandNotFound):
