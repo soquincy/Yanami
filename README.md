@@ -21,7 +21,7 @@ Freesona is a flexible Discord bot that allows you to live-edit its personality 
 ### 1. Installation
 
 ```bash
-git clone [https://github.com/soquincy/Freesona.git](https://github.com/soquincy/Freesona.git)
+git clone https://github.com/soquincy/Freesona.git
 cd Freesona
 pip install -r requirements.txt
 ```
