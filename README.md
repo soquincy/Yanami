@@ -1,87 +1,78 @@
 # Freesona - The Discord Bot You Customize
 
-[Discord](https://discord.gg/fEHw2e2zrW)
+[Discord Support](https://discord.gg/fEHw2e2zrW)
 
-Freesona is your Discord bot with a customizable personality. Its knowledge is limited to late 2025, so for the latest information, use the `~search` command!
+Freesona is a flexible Discord bot that allows you to live-edit its personality directly from Discord. Powered by Gemini AI and integrated with web search, math, and media tools, it is a versatile companion for any server.
 
 ## Features
 
-Here's what Freesona can do:
+* **Dynamic Persona:** Use `/setpersona` to change how the bot thinks, speaks, and acts via a private Discord Modal.
+* **AI Chat:** Use `~write` or `/write` to chat with the bot using the active persona.
+* **Web Search:** Use `~search <query>` to get an AI-summarized overview from the live web.
+* **Math Engine:** Solve equations using the Wolfram|Alpha hybrid API.
+* **Media Downloader:** Download videos or convert links to MP3 directly in chat (10MB limit).
+* **Moderation Suite:** Standard tools including `~purge`, `~ban`, `~kick`, and `~timeout`.
+* **Hybrid Commands:** Supports both traditional prefix commands (`~`) and Slash Commands (`/`).
 
-* **Chat & Ask:** Use the `~write` or `~ask` command to chat with Freesona, powered by the Gemini AI.
-* **Web Search:** Need up-to-date info? Use `~search <your query>` to get a summary from the web.
-* **Math:** Can answer simple math questions with the Wolfram|Alpha API.
-* **Greetings:** Say hello with `~hello`.
-* **Date:** Find out the current date with `~today`.
-* **Moderation:** (Requires appropriate permissions)
-  * `~purge <amount>`: Delete a specified number of messages (1-100).
-  * `~ban <member> [reason]`: Ban a member from the server.
-  * `~kick <member> [reason]`: Kick a member from the server.
-  * `~timeout <member> <duration> [reason]`: Timeout a member (e.g., `10s`, `5m`, `1h`, `1d`, max `28d`).
-  * `~removetimeout <member>` or `~rt <member>` or `~untimeout <member>`: Remove a timeout from a member.
-* **Help:** Get a list of commands with `~help`, or details on a specific command with `~help <command_name>`.
+---
 
 ## Getting Started
 
-To run Freesona yourself, follow these steps:
+### 1. Installation
 
-1. **Clone the repository:**
+```bash
+git clone [https://github.com/soquincy/Freesona.git](https://github.com/soquincy/Freesona.git)
+cd Freesona
+pip install -r requirements.txt
+```
 
-   ```bash
-   git clone https://github.com/soquincy/Freesona.git
-   cd Freesona
-   ```
+### 2. Environment Variables
 
-2. **Install dependencies:**
+Create a `.env` file in the root directory. You must configure the `AI_PERSONA_FILE` path based on where you are running the bot:
 
-   ```bash
-   pip install -r requirements.txt
-   ```
+| Environment | Recommended `AI_PERSONA_FILE` | Description |
+| :--- | :--- | :--- |
+| **Windows (Local)** | `persona.txt` | Saves the file in the bot's project folder. |
+| **Railway (Cloud)** | `/etc/secrets/persona.txt` | Saves to a persistent volume (requires mount). |
+| **Linux (Server)** | `./persona.txt` | Uses a relative path in the current directory. |
 
-3. **Set up environment variables:**
+**Example `.env`:**
 
-   * Create a `.env` file in the same directory as your bot script.
-   * Add the following environment variables, replacing the placeholders with your actual values:
+```dotenv
+BOT_TOKEN=YOUR_DISCORD_BOT_TOKEN
+GOOGLE_API_KEY=YOUR_GEMINI_API_KEY
+GOOGLE_SEARCH_API_KEY=YOUR_GOOGLE_SEARCH_API_KEY
+SEARCH_ENGINE_ID=YOUR_GOOGLE_SEARCH_ENGINE_ID
+WOLFRAM_APPID_SHORT=YOUR_WOLFRAM_APPID_SHORT
+WOLFRAM_APPID_LLM=YOUR_WOLFRAM_APPID_LLM
+AI_PERSONA_FILE=persona.txt 
+BOT_NAME="Freesona"
+```
 
-     ```dotenv
-     BOT_TOKEN=YOUR_DISCORD_BOT_TOKEN
-     GOOGLE_API_KEY=YOUR_GEMINI_API_KEY
-     CHANNEL_ID=YOUR_DISCORD_CHANNEL_ID
-     GOOGLE_CUSTOM_SEARCH_API_KEY=YOUR_GOOGLE_CUSTOM_SEARCH_API_KEY
-     SEARCH_ENGINE_ID=YOUR_GOOGLE_CUSTOM_SEARCH_ENGINE_ID
-     WOLFRAM_APPID_SHORT=YOUR_WOLFRAM_APPID_SHORT
-     WOLFRAM_APPID_LL=YOUR_WOLFRAM_APPID_LLM
-     AI_PERSONA_FILE=persona.txt
-     BOT_NAME="Freesona"
-     ```
+### 3. Persistence & Setup
 
-   * **`BOT_TOKEN`:** Create a bot application on the [Discord Developer Portal](https://discord.com/developers/applications) and get its token.
-   * **`GOOGLE_API_KEY`:** Obtain a Gemini API key from the [Google Cloud AI Platform](https://console.cloud.google.com/vertex-ai/generative/language/get-started).
-   * **`CHANNEL_ID`:** Enable Developer Mode in Discord (User Settings > Advanced), then right-click on the desired channel and select "Copy ID".
-   * **`GOOGLE_CUSTOM_SEARCH_API_KEY` / `SEARCH_ENGINE_ID`:** Set up a Custom Search Engine on the [Google Cloud Console](https://console.cloud.google.com/) and obtain your API key and Search Engine ID.
-   * **`WOLFRAM_APPID_SHORT` / `WOLFRAM_APPID_LL`:** Log in or create a Wolfram Account on the [Wolfram Developer Portal](https://developer.wolframalpha.com/) then get the 'LLM API' and 'Short Answers API' App IDs.
-   * **`AI_PERSONA_FILE`:** Path to a plain text file that defines the bot's personality and behavior. The bot loads this at startup, so you can customize the persona without touching any code.
-   * **`BOT_NAME`:** The display name the bot uses for itself. Set this to whatever you named your bot on the Discord Developer Portal.
+The bot manages storage automatically to ensure your customization is never lost:
 
-4. **Run the bot:**
+* **Fresh Install:** At startup, the bot checks for the persona file. If missing, it falls back to the `AI_PERSONA` text in your `.env` or a default greeting.
+* **Auto-Creation:** The bot will automatically create the `persona.txt` file at your specified path the first time you use the `/setpersona` command.
+* **Cloud Persistence:** If using Railway, ensure you have a Volume mounted to the directory specified in your `AI_PERSONA_FILE` path (e.g., `/etc/secrets`).
 
-   ```bash
-   python main.py
-   ```
+---
 
-   *(Replace `bot.py` with the actual filename if you renamed it.)*
+## How to Customize the Persona
 
-## Contributing
-
-Contributions are welcome! If you have suggestions or want to add new features, feel free to open an issue or submit a pull request.
+1. Type **/setpersona** in your Discord server.
+2. A private window (Modal) will appear. **Note:** Only the bot owner can trigger this.
+3. Enter your new instructions and click **Submit**.
+4. The bot updates its memory and saves to the file instantly.
 
 ## License
 
-This project is licensed under the **MIT License**. See the [LICENSE](LICENSE) file for more details.
+Licensed under the **MIT License**. See the [LICENSE](LICENSE) file for more details.
 
 ## Acknowledgements
 
-* [discord.py](https://discordpy.readthedocs.io/) for providing the Discord API wrapper.
-* [Google Generative AI](https://ai.google.dev/) for the Gemini API.
-* [Google Cloud Custom Search API](https://developers.google.com/custom-search/v1/overview) for the web search functionality.
-* [Wolfram|Alpha](https://developer.wolframalpha.com/) for the math API.
+* [discord.py](https://discordpy.readthedocs.io/)
+* [Google Gemini](https://ai.google.dev/)
+* [Wolfram|Alpha](https://developer.wolframalpha.com/)
+* [yt-dlp](https://github.com/yt-dlp/yt-dlp)
