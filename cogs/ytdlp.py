@@ -1,6 +1,7 @@
 import asyncio
 import discord
 from discord.ext import commands
+from discord import app_commands
 import os
 import tempfile
 import time
@@ -19,7 +20,6 @@ class YtDlp(commands.Cog):
         """Forces the video to fit under the target size using FFmpeg."""
         output_path = input_path.replace(".mp4", "_fixed.mp4")
         
-        # Get duration using ffprobe
         duration_cmd = [
             "ffprobe", "-v", "error", "-show_entries", "format=duration",
             "-of", "default=noprint_wrappers=1:nokey=1", input_path
@@ -34,7 +34,6 @@ class YtDlp(commands.Cog):
         except (ValueError, TypeError):
             return None
 
-        # Calculate bitrate (Target 9.5MB for safety)
         target_total_bitrate = (target_size_mb * 8 * 1024 * 1024) / duration
         video_bitrate = int(target_total_bitrate - 128000)
 
@@ -64,11 +63,10 @@ class YtDlp(commands.Cog):
             files = os.listdir(tmp_dir)
             return os.path.join(tmp_dir, files[0]) if files else None
 
-        # Step down through qualities: 1080p -> 720p -> 480p
         for height in [1080, 720, 480]:
-            # Clear previous attempts in this temp dir
             for f in os.listdir(tmp_dir): 
-                os.remove(os.path.join(tmp_dir, f))
+                try: os.remove(os.path.join(tmp_dir, f))
+                except: pass
             
             output_path = os.path.join(tmp_dir, f"%(uploader)s – %(title)s.{ext}")
             cmd = [
@@ -84,7 +82,6 @@ class YtDlp(commands.Cog):
                 if os.path.getsize(path) <= self.limit:
                     return path
                 elif height == 480:
-                    # If even 480p is too big, compress it
                     return await self.compress_video(path)
         return None
 
@@ -98,25 +95,27 @@ class YtDlp(commands.Cog):
                 local_path = await self.fetch_ytdlp(ctx, url, is_audio, tmp_dir)
 
                 if not local_path or not os.path.exists(local_path):
-                    return await ctx.send(f"❌ **{kind} failed.** Content is unavailable or too large to compress.")
+                    return await ctx.send(f"❌ **{kind} failed.** Content is unavailable or too large.")
 
                 elapsed = time.perf_counter() - start_time
                 size_mb = os.path.getsize(local_path) / (1024 * 1024)
 
-                if size_mb > 10.1: # Allow a tiny margin for metadata
-                    return await ctx.send(f"⚠️ **{kind} ({size_mb:.1f}MB) exceeds 10MB limit.**")
+                if size_mb > 10.2: 
+                    return await ctx.send(f"⚠️ **{kind} ({size_mb:.1f}MB) exceeds limit.**")
 
                 await ctx.send(
                     content=f"✅ **{kind} Downloaded** • {elapsed:.2f}s",
                     file=discord.File(local_path)
                 )
 
-    @commands.command(name="download", aliases=["dl"])
+    @commands.hybrid_command(name="download", description="Download a video (1080p/720p/480p/Compressed)")
+    @app_commands.describe(url="The URL of the video to download")
     @commands.cooldown(1, 30, commands.BucketType.user)
     async def download_video(self, ctx, url: str):
         await self.handle_download(ctx, url, is_audio=False)
 
-    @commands.command(name="audio", aliases=["mp3"])
+    @commands.hybrid_command(name="audio", description="Download video as an MP3")
+    @app_commands.describe(url="The URL of the audio to download")
     @commands.cooldown(1, 30, commands.BucketType.user)
     async def download_audio(self, ctx, url: str):
         await self.handle_download(ctx, url, is_audio=True)
@@ -125,7 +124,7 @@ class YtDlp(commands.Cog):
     @download_audio.error
     async def dl_error(self, ctx, error):
         if isinstance(error, commands.CommandOnCooldown):
-            await ctx.send(f"⏳ Wait **{error.retry_after:.1f}s** before trying again.", delete_after=10)
+            await ctx.send(f"⏳ Wait **{error.retry_after:.1f}s**.", ephemeral=True, delete_after=10)
 
 async def setup(bot):
     await bot.add_cog(YtDlp(bot))
