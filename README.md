@@ -66,7 +66,7 @@ To run Freesona yourself, follow these steps:
 4. **Run the bot:**
 
    ```bash
-   python bot.py
+   python main.py
    ```
 
    *(Replace `bot.py` with the actual filename if you renamed it.)*
