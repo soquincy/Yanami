@@ -32,7 +32,7 @@ GOOGLE_SEARCH_API_KEY = os.getenv("GOOGLE_SEARCH_API_KEY")
 SEARCH_ENGINE_ID = os.getenv("SEARCH_ENGINE_ID")
 BOT_NAME = os.getenv("BOT_NAME", "Bot")
 AI_PERSONA_PATH = os.getenv("AI_PERSONA_FILE", "/etc/secrets/persona.txt")
-MODEL_NAME = "gemini-flash-latest"
+MODEL_NAME = "gemma-4-26b-a4b-it"
 
 if not GOOGLE_API_KEY:
     raise EnvironmentError("GOOGLE_API_KEY missing.")
