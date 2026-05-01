@@ -97,7 +97,7 @@ async def on_ready():
             current_p = get_prefix(bot, None)
             await channel.send(
                 f"Heya! {bot_name} here! Current prefix is `{current_p}`. "
-                "For fresh info, use `~search <query>`."
+                "For fresh info, use `{current_p}search <query>`."
             )
         except Exception as e:
             logger.warning(f"Failed to send startup message: {e}")
