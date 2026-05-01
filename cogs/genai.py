@@ -231,7 +231,8 @@ class GenAICog(commands.Cog):
     async def cog_unload(self):
         pass
 
-    @commands.hybrid_command(name="setpersona")
+    # /setpersona command: Sets system prompt
+    @commands.hybrid_command(name='setpersona', help='Update the bots personality (Owner only).')
     @commands.is_owner()
     async def set_persona(self, ctx):
         if ctx.interaction:
@@ -239,7 +240,8 @@ class GenAICog(commands.Cog):
         else:
             await ctx.send("Use slash command.")
 
-    @commands.hybrid_command(name="write", aliases=["ask"])
+    # Write command: Queries bot without searching the internet.
+    @commands.hybrid_command(name='write', aliases=['ask'], help='Ask the AI anything.')
     async def write_cmd(self, ctx, *, query: str):
         await ctx.defer()
 
@@ -254,7 +256,8 @@ class GenAICog(commands.Cog):
 
             await ctx.send(embed=embed)
 
-    @commands.hybrid_command(name="search")
+    # Search command: Surfs the web to yield results. Requires Google Search API
+    @commands.hybrid_command(name='search', help='Search Google and summarize with AI.')
     async def search_cmd(self, ctx, *, query: str):
         await ctx.defer()
 
