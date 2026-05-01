@@ -247,7 +247,7 @@ class GenAICog(commands.Cog):
             text = await generate_gemini_content(query)
 
             embed = discord.Embed(
-                title=BOT_NAME,
+                title=f"✨ {BOT_NAME} says...",
                 description=text,
                 color=discord.Color.green()
             )
