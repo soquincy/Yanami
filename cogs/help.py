@@ -24,7 +24,7 @@ class HelpCog(commands.Cog):
         if not command_name:
             embed = discord.Embed(
                 title=f"{BOT_NAME}'s Command List!", 
-                description=f"Use `{prefix}help <command_name>` for more details on a specific command.",
+                description="Use `help <command_name>` for more details on a specific command.",
                 color=discord.Color.random()
             )
             embed.set_thumbnail(url=self.bot.user.display_avatar.url)
@@ -40,13 +40,13 @@ class HelpCog(commands.Cog):
 
                 # Category Mapping
                 if cmd.name in ['hello', 'write', 'ask', 'today']:
-                    fun_cmds.append(f"`{prefix}{cmd.name}` - {cmd.help or 'No description'}")
+                    fun_cmds.append(f"`{cmd.name}` - {cmd.help or 'No description'}")
                 elif cmd.name in ['kick', 'purge', 'removetimeout', 'rt', 'timeout', 'ban']:
-                    mod_cmds.append(f"`{prefix}{cmd.name}` - {cmd.help or 'No description'}")
+                    mod_cmds.append(f"`{cmd.name}` - {cmd.help or 'No description'}")
                 elif cmd.name in ['math', 'search', 'help']:
-                    util_cmds.append(f"`{prefix}{cmd.name}` - {cmd.help or 'No description'}")
+                    util_cmds.append(f"`{cmd.name}` - {cmd.help or 'No description'}")
                 elif cmd.name in ['download', 'audio']:
-                    media_cmds.append(f"`{prefix}{cmd.name}` - {cmd.help or 'No description'}")
+                    media_cmds.append(f"`{cmd.name}` - {cmd.help or 'No description'}")
 
             if fun_cmds:
                 embed.add_field(name="🎉 Fun & Info", value="\n".join(fun_cmds), inline=False)
@@ -57,7 +57,7 @@ class HelpCog(commands.Cog):
             if util_cmds:
                 embed.add_field(name="🔧 Utility", value="\n".join(util_cmds), inline=False)
 
-            embed.set_footer(text="Remember, my knowledge is mostly from late 2025!")
+            embed.set_footer(text=f"Current prefix: {prefix} • Remember, my knowledge is mostly from early 2025!")
             await ctx.send(embed=embed)
 
         else:
