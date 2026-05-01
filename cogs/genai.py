@@ -187,9 +187,7 @@ class GenAICog(commands.Cog):
         async with ctx.typing():
             results = await web_search(query)
             summary_prompt = (
-                f"Today's date is {datetime.utcnow().strftime('%B %d, %Y')}. "
-                f"The following are real, current search results. Treat them as factual and do not contradict them with prior knowledge.\n\n"
-                f"Summarize these search results for the query '{query}':\n\n{results}"
+                f"Strictly summarize the search results for '{query}' in a concise manner, omitting all preamble or unrelated trivia:\n\n{results}"
             )
             summary = await generate_gemini_content(summary_prompt, apply_persona=False)
 
