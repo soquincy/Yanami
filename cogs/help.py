@@ -57,7 +57,7 @@ class HelpCog(commands.Cog):
             if util_cmds:
                 embed.add_field(name="🔧 Utility", value="\n".join(util_cmds), inline=False)
 
-            embed.set_footer(text=f"Current prefix: {prefix} • Remember, my knowledge is mostly from early 2025!")
+            embed.set_footer(text=f"Current prefix: {self.bot.command_prefix(self.bot, ctx.message)} • Remember, my knowledge is mostly from late 2025!")
             await ctx.send(embed=embed)
 
         else:
