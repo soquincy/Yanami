@@ -1,3 +1,6 @@
+# cogs/genai.py: Google AI Studio functions.
+# If you don't want to use AI you may remove it on line 49 at main.py (cogs.genai)
+
 import os
 import re
 import asyncio
@@ -29,6 +32,7 @@ BOT_NAME = os.getenv("BOT_NAME", "Bot")
 # Update this variable in Railway to /etc/secrets/persona.txt
 AI_PERSONA_PATH = os.getenv("AI_PERSONA_FILE", "/etc/secrets/persona.txt")
 MODEL_NAME = "gemini-flash-latest"
+# You may change it to any free or paid models. Refer to https://ai.google.dev/gemini-api/docs/models for the full model list.
 
 # Ensure required keys exist
 if not GOOGLE_API_KEY:
@@ -131,10 +135,11 @@ async def generate_gemini_content(prompt: str, apply_persona: bool = True) -> st
 async def web_search(query: str) -> str:
     url = "https://www.googleapis.com/customsearch/v1"
     params = {
-        "key": GOOGLE_SEARCH_API_KEY, 
-        "cx": SEARCH_ENGINE_ID, 
-        "q": query, 
-        "num": 5
+        "key": GOOGLE_SEARCH_API_KEY,
+        "cx": SEARCH_ENGINE_ID,
+        "q": query,
+        "num": 5,
+        "dateRestrict": "m6"  # Restrict to last 6 months
     }
     try:
         response = await asyncio.to_thread(requests.get, url, params=params, timeout=10)
@@ -152,6 +157,7 @@ class GenAICog(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
+    # Set persona command: Sets system prompt
     @commands.hybrid_command(name='setpersona', help='Update the bots personality (Owner only).')
     @commands.is_owner()
     async def set_persona(self, ctx):
@@ -161,38 +167,39 @@ class GenAICog(commands.Cog):
         else:
             await ctx.send("Please use the slash command `/setpersona` to open the editor.")
 
+    # Write command: Queries bot without searching the internet.
     @commands.hybrid_command(name='write', aliases=['ask'], help='Ask the AI anything.')
     @app_commands.describe(query="Your question or prompt for the AI.")
     async def write_cmd(self, ctx, *, query: str):
         await ctx.defer()
-        
-        response_text = await generate_gemini_content(query)
-        
-        embed = discord.Embed(
-            title=f"✨ {BOT_NAME}",
-            description=response_text[:4000],
-            color=discord.Color.brand_green()
-        )
-        embed.set_footer(text=f"Asked by {ctx.author}", icon_url=ctx.author.display_avatar.url)
-        await ctx.send(embed=embed)
+        async with ctx.typing():
+            response_text = await generate_gemini_content(query)
+            embed = discord.Embed(
+                title=f"✨ {BOT_NAME}",
+                description=response_text[:4000],
+                color=discord.Color.brand_green()
+            )
+            embed.set_footer(text=f"Asked by {ctx.author}", icon_url=ctx.author.display_avatar.url)
+            await ctx.send(embed=embed)
 
+    # Search command: Surfs the web to yield results. Requires Google Search API
     @commands.hybrid_command(name='search', help='Search Google and summarize with AI.')
     @app_commands.describe(query="The topic you want to research.")
     async def search_cmd(self, ctx, *, query: str):
         await ctx.defer()
-        
-        results = await web_search(query)
-        summary_prompt = f"Summarize these search results for the query '{query}':\n\n{results}"
-        summary = await generate_gemini_content(summary_prompt, apply_persona=False)
+        async with ctx.typing():
+            results = await web_search(query)
+            summary_prompt = f"Summarize these search results for the query '{query}':\n\n{results}\n\nOnly summarize what the results say. If any results appear fabricated or future-dated, flag them explicitly."
+            summary = await generate_gemini_content(summary_prompt, apply_persona=False)
 
-        embed = discord.Embed(
-            title=f"🔎 Search Results: {query}",
-            description=summary[:4000],
-            color=discord.Color.blue()
-        )
-        search_url = f"https://www.google.com/search?q={urllib.parse.quote(query)}"
-        embed.add_field(name="Sources", value=f"[View Google Search]({search_url})")
-        await ctx.send(embed=embed)
+            embed = discord.Embed(
+                title=f"🔎 Search Results: {query}",
+                description=summary[:4000],
+                color=discord.Color.blue()
+            )
+            search_url = f"https://www.google.com/search?q={urllib.parse.quote(query)}"
+            embed.add_field(name="Sources", value=f"[View Google Search]({search_url})")
+            await ctx.send(embed=embed)
 
 async def setup(bot):
     await bot.add_cog(GenAICog(bot))

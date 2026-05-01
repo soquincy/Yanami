@@ -1,3 +1,5 @@
+# cogs/wolfram.py: Wolfram Alpha query solution
+
 import os
 import aiohttp
 import logging
@@ -10,6 +12,7 @@ from urllib.parse import quote
 WOLFRAM_SHORT_APPID = os.getenv("WOLFRAM_APPID_SHORT")
 WOLFRAM_LLM_APPID = os.getenv("WOLFRAM_APPID_LLM")
 
+# Formatting function
 class WolframCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -63,6 +66,7 @@ class WolframCog(commands.Cog):
         embed.set_footer(text=f"Query: {query}")
         return embed
 
+    # Math command
     @commands.hybrid_command(name="math", aliases=['wa', 'wolfram', 'mq'], help="Answers math queries using Wolfram Alpha.")
     @app_commands.describe(query="The math problem or question you want to solve.")
     async def math(self, ctx, *, query: str):

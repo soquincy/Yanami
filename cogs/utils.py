@@ -1,3 +1,5 @@
+# cogs/utils.py: Utility functions like ban, timeouts, kicks
+
 import discord
 from discord.ext import commands
 from discord import app_commands
@@ -28,6 +30,34 @@ class UtilCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
+    # Kick comamnd
+    @commands.hybrid_command(name='kick', help='Kicks a member from the server.')
+    @app_commands.describe(member="The member to kick.", reason="Reason for the kick.")
+    @commands.has_permissions(kick_members=True)
+    @commands.bot_has_permissions(kick_members=True)
+    async def kick_cmd(self, ctx, member: discord.Member, *, reason: str = "No reason provided"):
+        await ctx.defer()
+
+        if member == ctx.author:
+            await ctx.send("You can't kick yourself.")
+            return
+        if member.top_role >= ctx.author.top_role and ctx.guild.owner != ctx.author:
+            await ctx.send("You can't kick someone with a role higher than or equal to yours.")
+            return
+
+        dm_embed = discord.Embed(title="You have been kicked", color=discord.Color.orange())
+        dm_embed.add_field(name="Server", value=ctx.guild.name, inline=False)
+        dm_embed.add_field(name="Reason", value=reason, inline=False)
+        dm_sent = await try_dm(member, dm_embed)
+
+        try:
+            await member.kick(reason=f"Kicked by {ctx.author}: {reason}")
+            note = "" if dm_sent else " *(couldn't DM user)*"
+            await ctx.send(f"**{member}** has been kicked. Reason: {reason}{note}")
+        except discord.Forbidden:
+            await ctx.send("I don't have permission to kick this member.")
+
+    # Purge (mass delete messages) command
     @commands.hybrid_command(name='purge', help='Deletes a specified number of messages (1-100).')
     @app_commands.describe(amount="The number of messages to delete (1-100).")
     @commands.has_permissions(manage_messages=True)
@@ -44,6 +74,7 @@ class UtilCog(commands.Cog):
         else:
             await ctx.send("Please provide a number between 1 and 100.")
 
+    # Ban command
     @commands.hybrid_command(name='ban', help='Bans a member from the server.')
     @app_commands.describe(member="The user to ban.", reason="Why are they being banned?")
     @commands.has_permissions(ban_members=True)
@@ -74,6 +105,27 @@ class UtilCog(commands.Cog):
         except discord.Forbidden:
             await ctx.send("I don't have permission to ban this user.")
 
+    # Unban command
+    @commands.hybrid_command(name='unban', help='Unbans a user from the server.')
+    @app_commands.describe(user="The user to unban (ID or user#tag).", reason="Reason for the unban.")
+    @commands.has_permissions(ban_members=True)
+    @commands.bot_has_permissions(ban_members=True)
+    async def unban_cmd(self, ctx, user: discord.User, *, reason: str = "No reason provided"):
+        await ctx.defer()
+
+        try:
+            await ctx.guild.unban(user, reason=f"Unbanned by {ctx.author}: {reason}")
+            dm_embed = discord.Embed(title="You have been unbanned", color=discord.Color.green())
+            dm_embed.add_field(name="Server", value=ctx.guild.name, inline=False)
+            dm_embed.add_field(name="Reason", value=reason, inline=False)
+            await try_dm(user, dm_embed)
+            await ctx.send(f"**{user}** has been unbanned. Reason: {reason}")
+        except discord.NotFound:
+            await ctx.send("That user isn't banned.")
+        except discord.Forbidden:
+            await ctx.send("I don't have permission to unban this user.")
+
+    # Timeout command
     @commands.hybrid_command(name='timeout', aliases=['to'], help='Times out a member.')
     @app_commands.describe(member="The member to timeout.", time_str="Duration (e.g. 10m, 1h).", reason="Reason for timeout.")
     @commands.has_permissions(moderate_members=True)
@@ -92,8 +144,9 @@ class UtilCog(commands.Cog):
         except discord.Forbidden:
             await ctx.send("I can't timeout that member.")
 
-    @commands.hybrid_command(name='untimeout', help='Removes a timeout from a member.')
-    @app_commands.describe(member="The member to untimeout.")
+    # Removetimeout command 
+    @commands.hybrid_command(name='removetimeout', aliases=['rt', 'rto'], help='Removes a timeout from a member.')
+    @app_commands.describe(member="The member to remove timeout.")
     @commands.has_permissions(moderate_members=True)
     @commands.bot_has_permissions(moderate_members=True)
     async def untimeout_cmd(self, ctx, member: discord.Member):

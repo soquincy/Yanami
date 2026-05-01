@@ -1,3 +1,5 @@
+# cogs/status.py: Discord status modifier and changes text status every 5 mins to the servers it has joined (if multiple.) 
+
 import discord
 from discord.ext import commands, tasks
 

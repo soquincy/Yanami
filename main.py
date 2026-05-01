@@ -1,3 +1,5 @@
+# main.py: Main code that loads the cogs and makes the bot run
+
 import discord
 from discord.ext import commands
 from discord import abc
@@ -9,7 +11,7 @@ import json
 from fastapi_server import app
 from dotenv import load_dotenv
 
-load_dotenv(os.path.join(os.path.dirname(__file__), "actual.env"))
+load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
 
 # --- Configuration & Persistence Setup ---
 bot_token = os.getenv("BOT_TOKEN")
@@ -41,7 +43,7 @@ class Freesona(commands.Bot):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
-    async def setup_hook(self):
+    async def setup_hook(self): # Defines what fuctions to load. You may add or remove cogs here.
         extensions = [
             "cogs.ytdlp", "cogs.hello", "cogs.help", 
             "cogs.utils", "cogs.genai", "cogs.wolfram", "cogs.status"

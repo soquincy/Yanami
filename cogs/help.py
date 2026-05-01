@@ -1,3 +1,5 @@
+# cogs/help.py: Help index
+
 import os
 import discord
 from discord.ext import commands
@@ -12,7 +14,8 @@ BOT_NAME = os.getenv("BOT_NAME", "Bot")
 class HelpCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-
+    
+    # Help command
     @commands.hybrid_command(name='help', help='Shows help information for commands.')
     @app_commands.describe(command_name="The name of the command you want details for.")
     async def help_cmd(self, ctx, *, command_name: str | None = None):
@@ -41,7 +44,7 @@ class HelpCog(commands.Cog):
                 # Category Mapping
                 if cmd.name in ['hello', 'write', 'ask', 'today']:
                     fun_cmds.append(f"`{cmd.name}` - {cmd.help or 'No description'}")
-                elif cmd.name in ['kick', 'purge', 'removetimeout', 'rt', 'timeout', 'ban']:
+                elif cmd.name in ['kick', 'purge', 'removetimeout', 'timeout', 'ban', 'unban']:
                     mod_cmds.append(f"`{cmd.name}` - {cmd.help or 'No description'}")
                 elif cmd.name in ['math', 'search', 'help']:
                     util_cmds.append(f"`{cmd.name}` - {cmd.help or 'No description'}")

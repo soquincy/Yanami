@@ -1,3 +1,5 @@
+# cogs/hello.py: Simple response and sample logic for future commands
+
 from discord.ext import commands
 
 class HelloCog(commands.Cog):

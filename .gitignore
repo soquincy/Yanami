@@ -1,4 +1,4 @@
 __pycache__/
 venv/
 persona.txt
-actual.env
+*.env
