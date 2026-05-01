@@ -2,14 +2,12 @@
 # If you don't want to use AI you may remove it on line 49 at main.py (cogs.genai)
 
 import os
-import re
 import asyncio
 import logging
 import requests
 import discord
 import urllib.parse
-from datetime import timedelta, datetime
-from typing import Optional
+from datetime import datetime
 
 from discord.ext import commands
 from discord import app_commands, ui
@@ -139,7 +137,6 @@ async def web_search(query: str) -> str:
         "cx": SEARCH_ENGINE_ID,
         "q": query,
         "num": 5,
-        "dateRestrict": "m6"  # Restrict to last 6 months
     }
     try:
         response = await asyncio.to_thread(requests.get, url, params=params, timeout=10)
@@ -189,7 +186,11 @@ class GenAICog(commands.Cog):
         await ctx.defer()
         async with ctx.typing():
             results = await web_search(query)
-            summary_prompt = f"Summarize these search results for the query '{query}':\n\n{results}\n\nOnly summarize what the results say. If any results appear fabricated or future-dated, flag them explicitly."
+            summary_prompt = (
+                f"Today's date is {datetime.utcnow().strftime('%B %d, %Y')}. "
+                f"The following are real, current search results. Treat them as factual and do not contradict them with prior knowledge.\n\n"
+                f"Summarize these search results for the query '{query}':\n\n{results}"
+            )
             summary = await generate_gemini_content(summary_prompt, apply_persona=False)
 
             embed = discord.Embed(
