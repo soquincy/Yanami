@@ -37,6 +37,7 @@ class HelpCog(commands.Cog):
             mod_cmds = []
             util_cmds = []
             media_cmds = []
+            ai_cmds = []
 
             for cmd in self.bot.commands:
                 if cmd.hidden:
@@ -50,6 +51,9 @@ class HelpCog(commands.Cog):
                     util_cmds.append(f"`{cmd.name}` - {cmd.help or 'No description'}")
                 elif cmd.name in ['download', 'audio']:
                     media_cmds.append(f"`{cmd.name}` - {cmd.help or 'No description'}")
+                elif cmd.name in ['setpersona', 'personalist', 'personaload',
+                    'personalock', 'personasave', 'personaunlock', 'debugpersona']:
+                    ai_cmds.append(f"`{cmd.name}` - {cmd.help or 'No description'}")
 
             if fun_cmds:
                 embed.add_field(name="Fun & Info", value="\n".join(fun_cmds), inline=False)
@@ -59,6 +63,8 @@ class HelpCog(commands.Cog):
                 embed.add_field(name="Moderation", value="\n".join(mod_cmds), inline=False)
             if util_cmds:
                 embed.add_field(name="Utility", value="\n".join(util_cmds), inline=False)
+            if ai_cmds:
+                embed.add_field(name="AI Persona", value="\n".join(ai_cmds), inline=False)
 
             embed.set_footer(text=f"Current prefix: {prefix}")
             await ctx.send(embed=embed)
