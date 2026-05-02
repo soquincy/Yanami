@@ -2,32 +2,33 @@
 
 import os
 import discord
+from typing import Optional
 from discord.ext import commands
 from discord import app_commands
 from dotenv import load_dotenv
 
-# Load .env variables
 load_dotenv()
-# Constants from environment
+
 BOT_NAME = os.getenv("BOT_NAME", "Bot")
 
 class HelpCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-    
-    # Help command
+
     @commands.hybrid_command(name='help', help='Shows help information for commands.')
     @app_commands.describe(command_name="The name of the command you want details for.")
-    async def help_cmd(self, ctx, *, command_name: str | None = None):
-        # Mandatory defer for hybrid/slash commands
+    async def help_cmd(self, ctx, *, command_name: Optional[str] = None):
         await ctx.defer()
-        
+
+        # Resolve prefix safely whether it's a string or callable
         prefix = self.bot.command_prefix
+        if callable(prefix):
+            prefix = prefix(self.bot, ctx.message)
 
         if not command_name:
             embed = discord.Embed(
-                title=f"{BOT_NAME}'s Command List!", 
-                description="Use `help <command_name>` for more details on a specific command.",
+                title=f"{BOT_NAME}'s Command List!",
+                description=f"Use `{prefix}help <command_name>` for more details on a specific command.",
                 color=discord.Color.random()
             )
             embed.set_thumbnail(url=self.bot.user.display_avatar.url)
@@ -41,8 +42,7 @@ class HelpCog(commands.Cog):
                 if cmd.hidden:
                     continue
 
-                # Category Mapping
-                if cmd.name in ['hello', 'write', 'ask', 'today']:
+                if cmd.name in ['hello', 'write', 'today']:
                     fun_cmds.append(f"`{cmd.name}` - {cmd.help or 'No description'}")
                 elif cmd.name in ['kick', 'purge', 'removetimeout', 'timeout', 'ban', 'unban']:
                     mod_cmds.append(f"`{cmd.name}` - {cmd.help or 'No description'}")
@@ -52,15 +52,15 @@ class HelpCog(commands.Cog):
                     media_cmds.append(f"`{cmd.name}` - {cmd.help or 'No description'}")
 
             if fun_cmds:
-                embed.add_field(name="🎉 Fun & Info", value="\n".join(fun_cmds), inline=False)
+                embed.add_field(name="Fun & Info", value="\n".join(fun_cmds), inline=False)
             if media_cmds:
-                embed.add_field(name="📥 Media", value="\n".join(media_cmds), inline=False)
+                embed.add_field(name="Media", value="\n".join(media_cmds), inline=False)
             if mod_cmds:
-                embed.add_field(name="🛡️ Moderation", value="\n".join(mod_cmds), inline=False)
+                embed.add_field(name="Moderation", value="\n".join(mod_cmds), inline=False)
             if util_cmds:
-                embed.add_field(name="🔧 Utility", value="\n".join(util_cmds), inline=False)
+                embed.add_field(name="Utility", value="\n".join(util_cmds), inline=False)
 
-            embed.set_footer(text=f"Current prefix: {self.bot.command_prefix(self.bot, ctx.message)} • Remember, my knowledge is mostly from late 2025!")
+            embed.set_footer(text=f"Current prefix: {prefix}")
             await ctx.send(embed=embed)
 
         else:
@@ -77,43 +77,41 @@ class HelpCog(commands.Cog):
                         params.append(f"<{name}>")
                     else:
                         params.append(f"[{name}]")
-                usage += " " + " ".join(params) + "`"
+                usage += (" " + " ".join(params) if params else "") + "`"
 
                 embed = discord.Embed(
-                    title=f"Help for `~{command.name}`",
+                    title=f"Help: `{prefix}{command.name}`",
                     description=command.help or "No description provided.",
                     color=discord.Color.green()
                 )
                 embed.add_field(name="Usage", value=usage, inline=False)
+
                 if command.aliases:
                     aliases = ", ".join([f"`{prefix}{a}`" for a in command.aliases])
                     embed.add_field(name="Aliases", value=aliases, inline=False)
 
-                # Cooldown info
                 if command._buckets and command._buckets._cooldown:
                     cd = command._buckets._cooldown
                     embed.add_field(name="Cooldown", value=f"{cd.rate} time(s) per {cd.per:.0f} seconds", inline=False)
 
-                # Permissions logic
                 perm_names = []
                 checks = getattr(command.callback, '__commands_checks__', [])
                 for check in checks:
                     if 'has_permissions' in str(check):
                         try:
-                            # Access the permissions via the closure
                             required_perms = [p for p, v in check.__closure__[0].cell_contents.items() if v]
                             perm_names.extend(p.replace('_', ' ').title() for p in required_perms)
                         except Exception:
                             pass
                     elif 'is_owner' in str(check):
                         perm_names.append("Bot Owner")
-                
+
                 if perm_names:
                     embed.add_field(name="Permissions", value=", ".join(perm_names), inline=False)
 
                 await ctx.send(embed=embed)
             else:
-                await ctx.send(f"Sorry, I couldn't find a command named `{command_name}`. Try `~help` for a list.")
+                await ctx.send(f"No command named `{command_name}` found. Try `{prefix}help` for the full list.")
 
 async def setup(bot):
     await bot.add_cog(HelpCog(bot))
