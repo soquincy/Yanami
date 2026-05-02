@@ -56,15 +56,15 @@ class HelpCog(commands.Cog):
                     ai_cmds.append(f"`{cmd.name}` - {cmd.help or 'No description'}")
 
             if fun_cmds:
-                embed.add_field(name="Fun & Info", value="\n".join(fun_cmds), inline=False)
+                embed.add_field(name="🎉 Fun & Info", value="\n".join(fun_cmds), inline=False)
             if media_cmds:
-                embed.add_field(name="Media", value="\n".join(media_cmds), inline=False)
+                embed.add_field(name="📥 Media", value="\n".join(media_cmds), inline=False)
             if mod_cmds:
-                embed.add_field(name="Moderation", value="\n".join(mod_cmds), inline=False)
+                embed.add_field(name="🛡️ Moderation", value="\n".join(mod_cmds), inline=False)
             if util_cmds:
-                embed.add_field(name="Utility", value="\n".join(util_cmds), inline=False)
+                embed.add_field(name="🔧 Utility", value="\n".join(util_cmds), inline=False)
             if ai_cmds:
-                embed.add_field(name="AI Persona", value="\n".join(ai_cmds), inline=False)
+                embed.add_field(name="🤖 AI Persona", value="\n".join(ai_cmds), inline=False)
 
             embed.set_footer(text=f"Current prefix: {prefix}")
             await ctx.send(embed=embed)
