@@ -2,7 +2,7 @@
 
 [Discord Support](https://discord.gg/fEHw2e2zrW)
 
-Most AI Discord bots are wrappers with a paywall in front of them.You get a personality someone else chose, running on infrastructure you don't control, locked behind a subscription you didn't ask for.
+Most AI Discord bots are wrappers with a paywall in front of them. You get a personality someone else chose, running on infrastructure you don't control, locked behind a subscription you didn't ask for.
 
 Freesona is different. It's a self-hosted bot template where **you write the system prompt** — live, from Discord, without touching code. Fork it, drop in your API key, write a persona, and your bot becomes whatever you need it to be: a server mascot, a character, a focused assistant, or nothing AI-related at all if you'd rather just use the utilities. Every part of it is open, modular, and yours.
 
