@@ -29,7 +29,7 @@ BOT_NAME             = os.getenv("BOT_NAME", "Bot")
 AI_PERSONA_PATH      = os.getenv("AI_PERSONA_FILE", "/etc/secrets/persona.txt")
 CONFIG_PATH          = os.getenv("CONFIG_FILE_PATH", "/etc/secrets/config.json")
 PERSONAS_PATH        = os.getenv("AI_PERSONAS_FILE", "/etc/secrets/personas.json")
-MODEL_NAME           = "gemma-4-26b-a4b-it"
+MODEL_NAME           = "gemma-4-31b-it"
 MEMORY_LIMIT         = 5   # max recent messages kept per channel
 SUMMARY_PROMPT       = "Summarize this conversation in 2-3 sentences, keeping key context only:"
 
