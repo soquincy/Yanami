@@ -84,13 +84,10 @@ async def change_prefix(ctx, new_prefix: str):
 @bot.event
 async def on_ready():
     print(f'Logged in as {bot.user}')
-    try:
-        synced = await bot.tree.sync()
-        print(f"Synced {len(synced)} command(s)")
-    except Exception as e:
-        print(f"Error syncing tree: {e}")
-
-    channel = bot.get_channel(CHANNEL_ID)
+    
+    # Removed global tree sync to prevent HTTP 429 gateway deadlocks.
+    
+    channel = bot.get_channel(int(CHANNEL_ID)) # Ensure CHANNEL_ID is cast to an integer
     if isinstance(channel, abc.Messageable):
         bot_name = os.getenv("BOT_NAME", "Bot")
         try:
