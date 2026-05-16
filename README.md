@@ -193,9 +193,6 @@ Licensed under the **MIT License**. See the [LICENSE](LICENSE) file for details.
 
 ### Short-term
 
-* `personas.json` sample file with working presets
-* `persona.txt.sample` updated with a complete worked example
-* `requirements.txt` audit — pin all dependencies to versions confirmed working on Railway
 * `/personadelete <name>` — remove saved profiles
 
 ### Medium-term
@@ -206,4 +203,4 @@ Licensed under the **MIT License**. See the [LICENSE](LICENSE) file for details.
 
 ### Long-term
 
-* Web dashboard via FastAPI for persona editing — `fastapi_server.py` is already in the repo as a foundation
+* Possible web dashboard via FastAPI for persona editing — `fastapi_server.py` is already in the repo as a foundation
