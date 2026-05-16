@@ -322,20 +322,27 @@ class GenAICog(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
-    # on_message: conversation channel listener
+# on_message: conversation channel listener
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
-        # Ignore bots, DMs, and command invocations
+        # Ignore bots, DMs
         if message.author.bot:
             return
         if message.guild is None:
             return
-        if message.content.startswith(self.bot.command_prefix(self.bot, message)):
+
+        # Check for command prefix safely using the bot's built-in utility
+        ctx = await self.bot.get_context(message)
+        if ctx.valid:
             return
 
         config = load_config()
         chat_channel_id = config.get("chat_channel_id")
         if not chat_channel_id or message.channel.id != int(chat_channel_id):
+            return
+
+        # Ensure the bot user is logged in
+        if not self.bot.user:
             return
 
         # Only respond if mentioned or replying to the bot
@@ -360,7 +367,7 @@ class GenAICog(commands.Cog):
                 username=username,
             )
             await message.reply(text)
-
+            
     # ~write: creative / structured output, stateless
     @commands.hybrid_command(name='write', help='Ask the AI to write or create something.')
     async def write_cmd(self, ctx, *, query: str):
