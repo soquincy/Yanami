@@ -2,7 +2,7 @@
 
 ![Freesona Banner](assets/b_freesona.png)
 
-[Discord Support](https://discord.gg/fEHw2e2zrW)
+[Discord Support](https://discord.gg/vXPRs2cHSE)
 
 Most AI Discord bots give you a product. Verba, MEE6, and every other hosted platform give you a personality someone else built, running on infrastructure you don't control, with a ceiling you'll eventually hit.
 
