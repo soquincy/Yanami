@@ -12,6 +12,8 @@ from typing import Optional
 
 from dotenv import load_dotenv
 
+from pathlib import Path
+
 load_dotenv()
 
 MVSEP_API_KEY = os.getenv("MVSEP_API_KEY")
@@ -148,7 +150,7 @@ class MVSepCog(commands.Cog):
         #     for file parameters in slash/hybrid commands (2.0+)
         if slash_attachment is not None:
             dest = os.path.join(tmp_dir, slash_attachment.filename)
-            await slash_attachment.save(dest)
+            await slash_attachment.save(Path(dest))
             return dest, None
 
         # 1b. Prefix command attachment via ctx.message

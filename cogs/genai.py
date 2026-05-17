@@ -31,7 +31,7 @@ AI_PERSONA_PATH       = os.getenv("AI_PERSONA_FILE", "/etc/secrets/persona.txt")
 AI_PERSONA_JSON_PATH  = os.getenv("AI_PERSONA_JSON_FILE", "/etc/secrets/persona.json")
 CONFIG_PATH           = os.getenv("CONFIG_FILE_PATH", "/etc/secrets/config.json")
 PERSONAS_PATH         = os.getenv("AI_PERSONAS_FILE", "/etc/secrets/personas.json")
-MODEL_NAME            = "gemma-4-26b-a4b-it"
+MODEL_NAME            = "gemini-flash-lite-latest"  # you may also use any model available in your Google Cloud project, e.g. gemini-flash-latest, or even gemma-*
 MEMORY_LIMIT          = 5
 SUMMARY_PROMPT        = "Summarize this conversation in 2-3 sentences, keeping key context only:"
 
@@ -647,15 +647,24 @@ class PersonaStyleModal(ui.Modal, title="Persona: Style & Instructions"):
 # /setpersona group
 # ---------------------------------------------------------------------------
 
+from discord.ext import commands  # Ensure this import is present
+
 class SetPersonaGroup(app_commands.Group):
     def __init__(self):
         super().__init__(name="setpersona", description="Edit the bot's persona (Owner only).")
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        if not await interaction.client.is_owner(interaction.user):
-            await interaction.response.send_message("Owner only.", ephemeral=True)
-            return False
-        return True
+        # Cast the client to commands.Bot to satisfy the type checker
+        bot = interaction.client
+        if isinstance(bot, commands.Bot):
+            if not await bot.is_owner(interaction.user):
+                await interaction.response.send_message("Owner only.", ephemeral=True)
+                return False
+            return True
+        
+        # Fallback if client is not commands.Bot
+        await interaction.response.send_message("Owner check failed.", ephemeral=True)
+        return False
 
     @app_commands.command(name="core", description="Edit core personality and background.")
     async def set_core(self, interaction: discord.Interaction):
