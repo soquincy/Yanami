@@ -207,10 +207,10 @@ PERSONA_FIELDS = [
 ]
 
 PERSONA_LABELS = {
-    "core_personality":    "Core Personality & Traits",
-    "background":          "Background & History",
-    "beliefs":             "Beliefs, Likes & Dislikes",
-    "language":            "Language & Communication Style",
+    "core_personality":     "Core Personality & Traits",
+    "background":           "Background & History",
+    "beliefs":              "Beliefs, Likes & Dislikes",
+    "language":             "Language & Communication Style",
     "system_instructions": "System Instructions",
 }
 
@@ -456,6 +456,8 @@ async def generate(
     apply_persona: bool = True,
     instruction_prefix: str = "",
     username: str = "",
+    image_bytes: Optional[bytes] = None,
+    image_mime: Optional[str] = None,
 ) -> ConversationResponse:
     await rate_limit()
     prompt = sanitize_prompt(prompt)
@@ -465,10 +467,30 @@ async def generate(
     user_text = f"{instruction_prefix}\n\n{prompt}".strip() if instruction_prefix else prompt
     display_text = f"{username}: {prompt}" if username else prompt
 
-    contents.append(types.Content(
-        role="user",
-        parts=[types.Part(text=user_text)]
-    ))
+    parts = []
+
+    # always include text (even if empty prompt for image-only queries)
+    if user_text:
+        parts.append(types.Part(text=user_text))
+
+    # attach image if present
+    if image_bytes:
+        parts.append(
+            types.Part.from_bytes(
+                data=image_bytes,
+                mime_type=image_mime or "image/png"
+            )
+        )
+
+    if not parts:
+        parts.append(types.Part(text="Describe this image"))
+
+    contents.append(
+        types.Content(
+            role="user",
+            parts=parts
+        )
+    )
 
     if channel_id is not None:
         LAST_DEBUG[channel_id] = user_text
@@ -555,6 +577,22 @@ async def web_search(query: str) -> str:
     except Exception as e:
         logger.error(f"Search error: {e}")
         return "Search failed."
+
+# ---------------------------------------------------------------------------
+# Attachment processing helper
+# ---------------------------------------------------------------------------
+
+async def _extract_image(message: Optional[discord.Message]) -> tuple[Optional[bytes], Optional[str]]:
+    if not message or not message.attachments:
+        return None, None
+    att = message.attachments[0]
+    if att.content_type and "image" in att.content_type:
+        try:
+            image_bytes = await att.read()
+            return image_bytes, att.content_type
+        except Exception as e:
+            logger.error(f"Failed to read message attachment: {e}")
+    return None, None
 
 # ---------------------------------------------------------------------------
 # Persona modals
@@ -647,14 +685,11 @@ class PersonaStyleModal(ui.Modal, title="Persona: Style & Instructions"):
 # /setpersona group
 # ---------------------------------------------------------------------------
 
-from discord.ext import commands  # Ensure this import is present
-
 class SetPersonaGroup(app_commands.Group):
     def __init__(self):
         super().__init__(name="setpersona", description="Edit the bot's persona (Owner only).")
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        # Cast the client to commands.Bot to satisfy the type checker
         bot = interaction.client
         if isinstance(bot, commands.Bot):
             if not await bot.is_owner(interaction.user):
@@ -662,7 +697,6 @@ class SetPersonaGroup(app_commands.Group):
                 return False
             return True
         
-        # Fallback if client is not commands.Bot
         await interaction.response.send_message("Owner check failed.", ephemeral=True)
         return False
 
@@ -695,6 +729,9 @@ class GenAICog(commands.Cog):
         if message.guild is None:
             return
 
+        if getattr(message, "interaction_metadata", None):
+            return
+
         prefix = await self.bot.get_prefix(message)
 
         if isinstance(prefix, str):
@@ -702,24 +739,22 @@ class GenAICog(commands.Cog):
         else:
             prefixes = prefix
 
-        # Block all prefixed commands immediately
         if any(message.content.startswith(p) for p in prefixes):
             return
 
         ctx = await self.bot.get_context(message)
 
-        # Extra protection for hybrid/app commands
         if ctx.valid:
             return
 
-        # Ignore Discord interaction echo/system messages
-        if message.interaction is not None:
-            return
+        image_bytes, image_mime = await _extract_image(message)
 
         response = await safe_generate(
-            message.content,
+            message.content or "What’s in this image?",
             channel_id=message.channel.id,
             username=message.author.display_name,
+            image_bytes=image_bytes,
+            image_mime=image_mime,
         )
 
         await send_response(
@@ -735,6 +770,9 @@ class GenAICog(commands.Cog):
             await ctx.send("AI commands are not available in DMs.")
             return
         await ctx.defer()
+
+        image_bytes, image_mime = await _extract_image(ctx.message)
+
         response = await safe_generate(
             query,
             instruction_prefix=(
@@ -744,6 +782,8 @@ class GenAICog(commands.Cog):
                 "Each idea must be separated clearly."
             ),
             apply_persona=True,
+            image_bytes=image_bytes,
+            image_mime=image_mime,
         )
         embed = discord.Embed(
             title=f"{BOT_NAME} says...",
@@ -759,6 +799,8 @@ class GenAICog(commands.Cog):
             await ctx.send("AI commands are not available in DMs.")
             return
 
+        image_bytes, image_mime = await _extract_image(ctx.message)
+
         response = await safe_generate(
             query,
             instruction_prefix=(
@@ -767,6 +809,8 @@ class GenAICog(commands.Cog):
                 "Do NOT use markdown headings like ###."
             ),
             username=ctx.author.display_name,
+            image_bytes=image_bytes,
+            image_mime=image_mime,
         )
 
         embed = discord.Embed(
@@ -868,7 +912,7 @@ class GenAICog(commands.Cog):
             await ctx.send("No saved profiles yet.")
             return
         names = "\n".join(f"- `{k}`" for k in profiles)
-        await ctx.send(f"Saved profiles:\n{names}", ephemeral=True if ctx.interaction else False)
+        await ctx.send(names, ephemeral=True if ctx.interaction else False)
 
     @commands.hybrid_command(name='personadelete', help='Delete a saved persona profile (Owner only).')
     @commands.is_owner()
@@ -921,7 +965,6 @@ class GenAICog(commands.Cog):
         channel_memory.pop(ctx.channel.id, None)
         channel_summary.pop(ctx.channel.id, None)
         await ctx.send("Memory cleared for this channel.")
-
 
 async def setup(bot):
     await bot.add_cog(GenAICog(bot))
