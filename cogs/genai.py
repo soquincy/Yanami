@@ -749,11 +749,14 @@ class GenAICog(commands.Cog):
     @commands.hybrid_command(name='ask', help='Ask the AI a question.')
     async def ask_cmd(self, ctx, *, query: str):
         try:
+            print(f"ASK INVOKED | interaction={ctx.interaction is not None}")
+
             if ctx.guild is None:
                 await ctx.send("AI commands are not available in DMs.")
                 return
 
-            await ctx.defer()
+            if ctx.interaction:
+                await ctx.defer()
 
             response = await safe_generate(
                 query,
@@ -761,12 +764,9 @@ class GenAICog(commands.Cog):
                 username=ctx.author.display_name,
             )
 
-            reply_target = ctx.message if ctx.interaction is None else None
-
             await send_response(
                 response,
-                ctx.channel,
-                reply_to=reply_target
+                ctx.channel
             )
 
         except Exception as e:
