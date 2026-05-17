@@ -1,6 +1,6 @@
 # Freesona - The Discord Bot You Customize
 
-![Freesona Banner](assets/b_freesona.png)
+![Freesona Banner](assets/b_freesona-01.png)
 
 [Discord Support](https://discord.gg/vXPRs2cHSE)
 
