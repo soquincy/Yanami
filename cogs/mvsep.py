@@ -125,13 +125,33 @@ class MVSepCog(commands.Cog):
     # Input resolver: attachment > direct URL > yt-dlp
     # ------------------------------------------------------------------
 
-    async def _resolve_input(self, ctx, source: Optional[str], tmp_dir: str) -> tuple[Optional[str], Optional[str]]:
+    async def _resolve_input(
+        self,
+        ctx,
+        source: Optional[str],
+        tmp_dir: str,
+        slash_attachment: Optional[discord.Attachment] = None,
+    ) -> tuple[Optional[str], Optional[str]]:
         """
         Returns (file_path, pass_url).
         file_path: local path to upload binary (or None)
         pass_url:  URL to pass directly to MVSEP (or None)
+
+        Priority:
+          1. slash_attachment (discord.Attachment from /separate)
+          2. ctx.message.attachments (prefix ~separate)
+          3. direct audio URL
+          4. yt-dlp platform URL
         """
-        # 1. Discord attachment takes priority
+        # 1a. Slash command attachment — discord.Attachment type hint
+        #     Per discord.py docs, discord.Attachment is the correct type
+        #     for file parameters in slash/hybrid commands (2.0+)
+        if slash_attachment is not None:
+            dest = os.path.join(tmp_dir, slash_attachment.filename)
+            await slash_attachment.save(dest)
+            return dest, None
+
+        # 1b. Prefix command attachment via ctx.message
         if ctx.message.attachments:
             att  = ctx.message.attachments[0]
             dest = os.path.join(tmp_dir, att.filename)
@@ -166,7 +186,7 @@ class MVSepCog(commands.Cog):
         help="Separate vocals and instrumental from audio. Attach a file or pass a URL."
     )
     @commands.cooldown(1, 60, commands.BucketType.guild)
-    async def separate(self, ctx, url: Optional[str] = None):
+    async def separate(self, ctx, url: Optional[str] = None, attachment: Optional[discord.Attachment] = None):
         if ctx.guild is None:
             await ctx.send("This command is server-only.")
             return
@@ -183,7 +203,7 @@ class MVSepCog(commands.Cog):
             )
             return
 
-        if not url and not ctx.message.attachments:
+        if not url and not ctx.message.attachments and not attachment:
             await ctx.send("Attach an audio file or pass a URL.")
             return
 
@@ -197,7 +217,7 @@ class MVSepCog(commands.Cog):
 
                     # Resolve input
                     try:
-                        file_path, pass_url = await self._resolve_input(ctx, url, tmp_dir)
+                        file_path, pass_url = await self._resolve_input(ctx, url, tmp_dir, slash_attachment=attachment)
                     except RuntimeError as e:
                         await status_msg.edit(content=f"❌ {e}")
                         return
