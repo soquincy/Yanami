@@ -1,5 +1,4 @@
 # main.py: Main code that loads the cogs and makes the bot run
-
 import discord
 from discord.ext import commands
 from discord import abc
@@ -16,7 +15,6 @@ load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
 # --- Configuration & Persistence Setup ---
 bot_token = os.getenv("BOT_TOKEN")
 channel_id_str = os.getenv("CHANNEL_ID")
-# Use /etc/secrets/config.json if in cloud, otherwise local config.json
 CONFIG_PATH = os.getenv("CONFIG_FILE_PATH", "config.json")
 
 if not bot_token or not channel_id_str:
@@ -42,17 +40,39 @@ def get_prefix(bot, message):
 class Freesona(commands.Bot):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
+        self._legacy_notice_sent = False  # guard: only DM once per session
 
-    async def setup_hook(self): # Defines what fuctions to load. You may add or remove cogs here.
+    async def setup_hook(self):
         extensions = [
-            "cogs.ytdlp", "cogs.hello", "cogs.help", 
-            "cogs.utils", "cogs.genai", "cogs.wolfram", "cogs.status"
+            "cogs.ytdlp", "cogs.hello", "cogs.help",
+            "cogs.utils", "cogs.genai", "cogs.wolfram", "cogs.status",
+            "cogs.mvsep",
         ]
         for ext in extensions:
             await self.load_extension(ext)
-        
+
         await self.tree.sync()
         print(f"Synced slash commands for {self.user}")
+
+    async def notify_owner_legacy(self, bot_name: str):
+        """DM the bot owner about legacy persona.txt — called from genai cog."""
+        if self._legacy_notice_sent:
+            return
+        self._legacy_notice_sent = True
+        try:
+            info = await self.application_info()
+            owner = info.owner
+            await owner.send(
+                f"⚠️ **{bot_name} detected a legacy `persona.txt` file.**\n\n"
+                f"The persona system now uses a structured `persona.json` format. "
+                f"Your existing persona is still active, but to use the new structured editor, "
+                f"you'll need to migrate your content into the new fields.\n\n"
+                f"Use `/setpersona core` and `/setpersona style` to set up the new format. "
+                f"Once saved, `persona.json` will take over and `persona.txt` can be removed.\n\n"
+                f"You can also run `/debugpersona` to confirm your current state."
+            )
+        except Exception as e:
+            logging.getLogger(__name__).warning(f"Could not DM owner for legacy persona notice: {e}")
 
 # Initialize Bot
 intents = discord.Intents.default()
@@ -68,11 +88,10 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s:%(levelname)s:%(name
 logger = logging.getLogger(__name__)
 
 # --- Commands & Events ---
-
 @bot.command(name="prefix")
 @commands.has_permissions(administrator=True)
 async def change_prefix(ctx, new_prefix: str):
-    """Changes the bot prefix and saves it to /etc/secrets/config.json"""
+    """Changes the bot prefix and saves it to config.json"""
     try:
         with open(CONFIG_PATH, "w") as f:
             json.dump({"prefix": new_prefix}, f)
@@ -84,23 +103,28 @@ async def change_prefix(ctx, new_prefix: str):
 @bot.event
 async def on_ready():
     print(f'Logged in as {bot.user}')
-    
-    # Removed global tree sync to prevent HTTP 429 gateway deadlocks.
-    
-    channel = bot.get_channel(int(CHANNEL_ID)) # Ensure CHANNEL_ID is cast to an integer
+
+    channel = bot.get_channel(CHANNEL_ID)
     if isinstance(channel, abc.Messageable):
         bot_name = os.getenv("BOT_NAME", "Bot")
         try:
             current_p = get_prefix(bot, None)
             await channel.send(
-                f"Heya! {bot_name} here! Current prefix is `{current_p}`. " 
+                f"Heya! {bot_name} here! Current prefix is `{current_p}`. "
                 "For fresh info, use `search <query>`."
             )
         except Exception as e:
             logger.warning(f"Failed to send startup message: {e}")
 
-# --- Background Tasks & Execution ---
+    # Trigger legacy persona DM if needed — deferred here so bot is fully ready
+    try:
+        from cogs.genai import LEGACY_DETECTED, BOT_NAME as GENAI_BOT_NAME
+        if LEGACY_DETECTED:
+            await bot.notify_owner_legacy(GENAI_BOT_NAME)
+    except Exception as e:
+        logger.warning(f"Legacy check failed: {e}")
 
+# --- Background Tasks & Execution ---
 async def start_http():
     config = uvicorn.Config(app, host="0.0.0.0", port=10000, log_level="warning")
     server = uvicorn.Server(config)
@@ -120,3 +144,4 @@ if __name__ == "__main__":
         asyncio.run(main())
     except KeyboardInterrupt:
         print("Bot stopped.")
+        

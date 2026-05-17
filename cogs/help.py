@@ -20,7 +20,6 @@ class HelpCog(commands.Cog):
     async def help_cmd(self, ctx, *, command_name: Optional[str] = None):
         await ctx.defer()
 
-        # Resolve prefix safely whether it's a string or callable
         prefix = self.bot.command_prefix
         if callable(prefix):
             prefix = prefix(self.bot, ctx.message)
@@ -43,16 +42,19 @@ class HelpCog(commands.Cog):
                 if cmd.hidden:
                     continue
 
-                if cmd.name in ['hello', 'write', 'today']:
+                if cmd.name in ['hello', 'write', 'ask', 'today']:
                     fun_cmds.append(f"`{cmd.name}` - {cmd.help or 'No description'}")
                 elif cmd.name in ['kick', 'purge', 'removetimeout', 'timeout', 'ban', 'unban']:
                     mod_cmds.append(f"`{cmd.name}` - {cmd.help or 'No description'}")
                 elif cmd.name in ['math', 'search', 'help']:
                     util_cmds.append(f"`{cmd.name}` - {cmd.help or 'No description'}")
-                elif cmd.name in ['download', 'audio']:
+                elif cmd.name in ['download', 'audio', 'separate']:
                     media_cmds.append(f"`{cmd.name}` - {cmd.help or 'No description'}")
-                elif cmd.name in ['setpersona', 'personalist', 'personaload',
-                    'personalock', 'personasave', 'personaunlock', 'debugpersona']:
+                elif cmd.name in [
+                    'personalock', 'personaunlock', 'personasave',
+                    'personaload', 'personalist', 'debugpersona',
+                    'setchannel', 'clearchannel', 'clearmemory',
+                ]:
                     ai_cmds.append(f"`{cmd.name}` - {cmd.help or 'No description'}")
 
             if fun_cmds:
@@ -64,7 +66,11 @@ class HelpCog(commands.Cog):
             if util_cmds:
                 embed.add_field(name="🔧 Utility", value="\n".join(util_cmds), inline=False)
             if ai_cmds:
-                embed.add_field(name="🤖 AI Persona", value="\n".join(ai_cmds), inline=False)
+                embed.add_field(
+                    name="🤖 AI Persona",
+                    value="\n".join(ai_cmds) + "\n`/setpersona core` `/setpersona style` — Edit persona (Owner only)",
+                    inline=False
+                )
 
             embed.set_footer(text=f"Current prefix: {prefix}")
             await ctx.send(embed=embed)
