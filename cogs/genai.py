@@ -692,17 +692,30 @@ class GenAICog(commands.Cog):
         if message.author.bot:
             return
 
+        if message.guild is None:
+            return
+
+        prefix = await self.bot.get_prefix(message)
+
+        if isinstance(prefix, str):
+            prefixes = [prefix]
+        else:
+            prefixes = prefix
+
+        # Block all prefixed commands immediately
+        if any(message.content.startswith(p) for p in prefixes):
+            return
+
         ctx = await self.bot.get_context(message)
 
-        # Ignore all registered commands (including hybrid commands)
+        # Extra protection for hybrid/app commands
         if ctx.valid:
             return
 
-        # Ignore interaction/system echo messages
+        # Ignore Discord interaction echo/system messages
         if message.interaction is not None:
             return
 
-        # Your existing AI chat logic below
         response = await safe_generate(
             message.content,
             channel_id=message.channel.id,
@@ -724,10 +737,16 @@ class GenAICog(commands.Cog):
         await ctx.defer()
         response = await safe_generate(
             query,
-            instruction_prefix="Respond with well-structured, written output. Use formatting where appropriate.",
+            instruction_prefix=(
+                "Return plain text only. "
+                "Use double newlines between paragraphs. "
+                "Do NOT use markdown, symbols, or headings. "
+                "Each idea must be separated clearly."
+            ),
+            apply_persona=True,
         )
         embed = discord.Embed(
-            title=f"{BOT_NAME} writes...",
+            title=f"{BOT_NAME} says...",
             description=response.first_text(),
             color=discord.Color.green()
         )
@@ -736,32 +755,27 @@ class GenAICog(commands.Cog):
     # ~ask — conversational, stateless, split messaging enabled
     @commands.hybrid_command(name='ask', help='Ask the AI a question.')
     async def ask_cmd(self, ctx, *, query: str):
-        try:
-            print(f"ASK INVOKED | interaction={ctx.interaction is not None}")
+        if ctx.guild is None:
+            await ctx.send("AI commands are not available in DMs.")
+            return
 
-            if ctx.guild is None:
-                await ctx.send("AI commands are not available in DMs.")
-                return
+        response = await safe_generate(
+            query,
+            instruction_prefix=(
+                "Write in clean paragraphs. "
+                "Use newline breaks between sections. "
+                "Do NOT use markdown headings like ###."
+            ),
+            username=ctx.author.display_name,
+        )
 
-            if ctx.interaction:
-                await ctx.defer()
+        embed = discord.Embed(
+            title=f"{BOT_NAME} answers...",
+            description=response.first_text(),
+            color=discord.Color.blue()
+        )
 
-            response = await safe_generate(
-                query,
-                instruction_prefix="Answer conversationally and concisely.",
-                username=ctx.author.display_name,
-            )
-
-            await send_response(
-                response,
-                ctx.channel
-            )
-
-        except Exception as e:
-            import traceback
-            traceback.print_exc()
-
-            await ctx.send(f"Error: `{e}`")
+        await ctx.send(embed=embed)
 
     # ~search
     @commands.hybrid_command(name='search', help='Search the web and summarize with AI.')
@@ -769,19 +783,35 @@ class GenAICog(commands.Cog):
         if ctx.guild is None:
             await ctx.send("AI commands are not available in DMs.")
             return
+
         await ctx.defer()
+
         results = await web_search(query)
+
         response = await safe_generate(
             f"Summarize these search results:\n\n{results}",
             apply_persona=False,
+            instruction_prefix=(
+                "Write in clean sections with paragraph breaks. "
+                "Do not use markdown headings like ###. "
+                "Keep structure readable in Discord embeds."
+            )
         )
+
+        text = response.first_text()
+
+        # normalize spacing
+        text = text.replace("### ", "\n\n")
+
         embed = discord.Embed(
             title=f"Search: {query}",
-            description=response.first_text(),
+            description=text[:4096],
             color=discord.Color.blue()
         )
+
         url = f"https://www.google.com/search?q={urllib.parse.quote(query)}"
-        embed.add_field(name="Full results", value=url)
+        embed.add_field(name="Full results", value=url, inline=False)
+
         await ctx.send(embed=embed)
 
     # Persona lock / unlock
