@@ -691,21 +691,24 @@ class GenAICog(commands.Cog):
     async def on_message(self, message: discord.Message):
         if message.author.bot:
             return
+
         if message.guild is None:
             return
 
-        prefixes = await self.bot.get_prefix(message)
-        if isinstance(prefixes, str):
-            prefixes = (prefixes,)
-        if message.content.startswith(tuple(prefixes)):
+        ctx = await self.bot.get_context(message)
+
+        # Ignore all registered commands
+        if ctx.valid:
             return
 
         config = load_config()
         chat_channel_id = config.get("chat_channel_id")
+
         if not chat_channel_id or message.channel.id != int(chat_channel_id):
             return
 
         bot_mentioned = self.bot.user in message.mentions if self.bot.user else False
+
         is_reply_to_bot = (
             message.reference is not None
             and message.reference.resolved is not None
@@ -718,6 +721,7 @@ class GenAICog(commands.Cog):
 
         username = message.author.display_name
         bot_name = self.bot.user.display_name if self.bot.user else BOT_NAME
+
         prompt = message.clean_content.replace(f"@{bot_name}", "").strip()
 
         response = await safe_generate(
@@ -725,7 +729,12 @@ class GenAICog(commands.Cog):
             channel_id=message.channel.id,
             username=username,
         )
-        await send_response(response, message.channel, reply_to=message)
+
+        await send_response(
+            response,
+            message.channel,
+            reply_to=message
+    )
 
     # ~write — structured output, stateless, single embed (no split)
     @commands.hybrid_command(name='write', help='Ask the AI to write or create something.')
