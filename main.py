@@ -88,10 +88,9 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s:%(levelname)s:%(name
 logger = logging.getLogger(__name__)
 
 # --- Commands & Events ---
-@bot.command(name="prefix")
+@bot.hybrid_command(name="prefix", description="Changes the bot prefix and saves it to config.json")
 @commands.has_permissions(administrator=True)
 async def change_prefix(ctx, new_prefix: str):
-    """Changes the bot prefix and saves it to config.json"""
     try:
         with open(CONFIG_PATH, "w") as f:
             json.dump({"prefix": new_prefix}, f)
