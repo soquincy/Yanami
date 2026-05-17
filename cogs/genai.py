@@ -712,6 +712,10 @@ class SetPersonaGroup(app_commands.Group):
 # Cog
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Cog
+# ---------------------------------------------------------------------------
+
 class GenAICog(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -729,6 +733,12 @@ class GenAICog(commands.Cog):
         if message.guild is None:
             return
 
+        # FIX FOR OLDER DISCORD.PY: Filter out system messages
+        # Only process normal text messages and replies
+        if message.type not in (discord.MessageType.default, discord.MessageType.reply):
+            return
+
+        # IMPORTANT FIX: ignore application-command / hybrid interactions
         if getattr(message, "interaction_metadata", None):
             return
 
