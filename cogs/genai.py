@@ -179,20 +179,32 @@ async def send_response(
 ) -> None:
     """
     Send a ConversationResponse to a channel.
-    - First segment replies to the triggering message if reply_to is set.
-    - Subsequent segments are plain sends to the channel.
-    - Typing indicator shown before each segment.
-    - Delay between segments simulates natural pacing.
+    - Combines all text segments into a single message to prevent overreplying.
+    - Calculates a single combined typing delay based on the segments.
     """
-    for i, segment in enumerate(response.segments):
-        if segment.typing:
-            async with channel.typing():
-                await asyncio.sleep(segment.delay)
+    if not response.segments:
+        return
 
-        if i == 0 and reply_to is not None:
-            await reply_to.reply(segment.text)
-        else:
-            await channel.send(segment.text)
+    # Combine all text segments into a single string
+    full_text = "\n\n".join(segment.text for segment in response.segments if segment.text.strip())
+    
+    if not full_text.strip():
+        return
+
+    # Determine if any segment requested typing, and calculate a reasonable single delay
+    any_typing = any(segment.typing for segment in response.segments)
+    total_delay = min(sum(segment.delay for segment in response.segments if segment.typing), 3.0)
+
+    # Show typing indicator once if needed
+    if any_typing and total_delay > 0:
+        async with channel.typing():
+            await asyncio.sleep(total_delay)
+
+    # Send the consolidated text as a single response
+    if reply_to is not None:
+        await reply_to.reply(full_text)
+    else:
+        await channel.send(full_text)
 
 # ---------------------------------------------------------------------------
 # Persona JSON structure
