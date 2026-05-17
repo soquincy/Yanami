@@ -692,49 +692,28 @@ class GenAICog(commands.Cog):
         if message.author.bot:
             return
 
-        if message.guild is None:
-            return
-
         ctx = await self.bot.get_context(message)
 
-        # Ignore all registered commands
+        # Ignore all registered commands (including hybrid commands)
         if ctx.valid:
             return
 
-        config = load_config()
-        chat_channel_id = config.get("chat_channel_id")
-
-        if not chat_channel_id or message.channel.id != int(chat_channel_id):
+        # Ignore interaction/system echo messages
+        if message.interaction is not None:
             return
 
-        bot_mentioned = self.bot.user in message.mentions if self.bot.user else False
-
-        is_reply_to_bot = (
-            message.reference is not None
-            and message.reference.resolved is not None
-            and isinstance(message.reference.resolved, discord.Message)
-            and message.reference.resolved.author == self.bot.user
-        )
-
-        if not bot_mentioned and not is_reply_to_bot:
-            return
-
-        username = message.author.display_name
-        bot_name = self.bot.user.display_name if self.bot.user else BOT_NAME
-
-        prompt = message.clean_content.replace(f"@{bot_name}", "").strip()
-
+        # Your existing AI chat logic below
         response = await safe_generate(
-            prompt,
+            message.content,
             channel_id=message.channel.id,
-            username=username,
+            username=message.author.display_name,
         )
 
         await send_response(
             response,
             message.channel,
-            reply_to=message
-    )
+            reply_to=message,
+        )
 
     # ~write — structured output, stateless, single embed (no split)
     @commands.hybrid_command(name='write', help='Ask the AI to write or create something.')
