@@ -732,10 +732,6 @@ class SetPersonaGroup(app_commands.Group):
 # Cog
 # ---------------------------------------------------------------------------
 
-# ---------------------------------------------------------------------------
-# Cog
-# ---------------------------------------------------------------------------
-
 class GenAICog(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -747,7 +743,11 @@ class GenAICog(commands.Cog):
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
-        if message.author.bot:
+        # Okay let's get this party started.
+        KONATA_ID = 1482682376655208548 
+
+        # Allow Konata through, but block all other bot accounts
+        if message.author.bot and message.author.id != KONATA_ID:
             return
 
         if message.guild is None:
