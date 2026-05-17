@@ -364,6 +364,7 @@ def get_memory(channel_id: int) -> deque:
 def memory_to_contents(channel_id: int) -> list:
     contents = []
     summary = channel_summary.get(channel_id)
+    
     if summary:
         contents.append(types.Content(
             role="user",
@@ -373,11 +374,18 @@ def memory_to_contents(channel_id: int) -> list:
             role="model",
             parts=[types.Part(text="Understood, I have context from earlier.")]
         ))
+        
+    # Merge consecutive roles to maintain strict alternating turns
     for entry in get_memory(channel_id):
-        contents.append(types.Content(
-            role=entry["role"],
-            parts=[types.Part(text=entry["text"])]
-        ))
+        if contents and contents[-1].role == entry["role"]:
+            # Append text to the existing turn instead of creating a new one
+            contents[-1].parts[0].text += f"\n{entry['text']}"
+        else:
+            contents.append(types.Content(
+                role=entry["role"],
+                parts=[types.Part(text=entry["text"])]
+            ))
+            
     return contents
 
 async def maybe_summarize(channel_id: int):
