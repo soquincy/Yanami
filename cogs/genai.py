@@ -2,6 +2,7 @@
 # If you don't want to use AI you may remove it on line 49 at main.py (cogs.genai)
 
 import os
+import re
 import json
 import asyncio
 import logging
@@ -10,6 +11,7 @@ import time
 import discord
 import urllib.parse
 from collections import deque
+from dataclasses import dataclass, field
 from typing import Optional
 
 from discord.ext import commands
@@ -33,6 +35,12 @@ MODEL_NAME            = "gemma-4-26b-a4b-it"
 MEMORY_LIMIT          = 5
 SUMMARY_PROMPT        = "Summarize this conversation in 2-3 sentences, keeping key context only:"
 
+# Split messaging config
+SPLIT_MIN_LENGTH  = 280   # chars — responses shorter than this are never split
+SPLIT_DELAY_BASE  = 1.2   # seconds between segments
+SPLIT_DELAY_PER_CHAR = 0.012  # additional delay per char in segment (typing realism)
+SPLIT_DELAY_MAX   = 3.5   # cap per segment
+
 if not GOOGLE_API_KEY:
     raise EnvironmentError("GOOGLE_API_KEY missing.")
 
@@ -40,6 +48,151 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("FreesonaBot")
 
 client = genai.Client(api_key=GOOGLE_API_KEY)
+
+# ---------------------------------------------------------------------------
+# Structured response types
+# Spec from handoff doc: ConversationResponse -> list[MessageSegment]
+# ---------------------------------------------------------------------------
+
+@dataclass
+class MessageSegment:
+    text: str
+    delay: float = SPLIT_DELAY_BASE
+    typing: bool = True
+    attachment: Optional[str] = None   # future: file/image ref
+
+@dataclass
+class ConversationResponse:
+    segments: list[MessageSegment] = field(default_factory=list)
+    reactions: list[str] = field(default_factory=list)
+    suggested_gif: Optional[str] = None  # stub — media awareness layer (future)
+
+    @property
+    def is_empty(self) -> bool:
+        return not self.segments
+
+    def first_text(self) -> str:
+        """Fallback for callers that only need the raw text."""
+        return " ".join(s.text for s in self.segments)
+
+# ---------------------------------------------------------------------------
+# Error classification
+# Per spec: never expose raw API errors to Discord users
+# ---------------------------------------------------------------------------
+
+class GenerationError(Exception):
+    """Base for all generation errors."""
+
+class TransientError(GenerationError):
+    """Temporary API failure — safe to retry."""
+
+class RateLimitError(GenerationError):
+    """Rate limit hit."""
+
+class MalformedResponseError(GenerationError):
+    """Model returned something unusable."""
+
+class TimeoutGenerationError(GenerationError):
+    """Request timed out."""
+
+def _classify_error(e: Exception) -> GenerationError:
+    msg = str(e).lower()
+    if "429" in msg or "quota" in msg or "rate" in msg:
+        return RateLimitError(str(e))
+    if "timeout" in msg or "timed out" in msg:
+        return TimeoutGenerationError(str(e))
+    if "500" in msg or "503" in msg or "internal" in msg:
+        return TransientError(str(e))
+    return GenerationError(str(e))
+
+# User-facing neutral messages per error class
+_ERROR_MESSAGES: dict[type, str] = {
+    RateLimitError:          "I'm a little overwhelmed right now — give me a moment.",
+    TimeoutGenerationError:  "That took too long. Try again?",
+    TransientError:          "Something hiccupped on my end. Try again in a bit.",
+    MalformedResponseError:  "I got confused by that one. Try rephrasing?",
+    GenerationError:         "Something went wrong. Try again.",
+}
+
+def _user_facing_error(e: GenerationError) -> str:
+    return _ERROR_MESSAGES.get(type(e), _ERROR_MESSAGES[GenerationError])
+
+# ---------------------------------------------------------------------------
+# Text splitter
+# Splits at paragraph breaks first, then sentence boundaries.
+# Returns list of non-empty strings.
+# ---------------------------------------------------------------------------
+
+def split_into_segments(text: str) -> list[str]:
+    """
+    Split response text into natural message segments.
+    Strategy (in order):
+      1. Split on double newlines (paragraph breaks)
+      2. If any segment is still very long, split at sentence boundary
+    Never splits if total length < SPLIT_MIN_LENGTH.
+    """
+    if len(text) < SPLIT_MIN_LENGTH:
+        return [text]
+
+    # Step 1: paragraph split
+    paragraphs = [p.strip() for p in re.split(r"\n{2,}", text) if p.strip()]
+    if len(paragraphs) <= 1:
+        # No paragraph breaks — try sentence split
+        sentences = re.split(r"(?<=[.!?])\s+", text)
+        # Group sentences into chunks of ~200 chars
+        chunks: list[str] = []
+        current = ""
+        for s in sentences:
+            if len(current) + len(s) > 220 and current:
+                chunks.append(current.strip())
+                current = s
+            else:
+                current = (current + " " + s).strip() if current else s
+        if current:
+            chunks.append(current.strip())
+        return chunks if len(chunks) > 1 else [text]
+
+    return paragraphs
+
+def build_response(text: str) -> ConversationResponse:
+    """Convert raw text into a ConversationResponse with timed segments."""
+    segments_text = split_into_segments(text)
+    segments = []
+    for seg in segments_text:
+        delay = min(
+            SPLIT_DELAY_BASE + len(seg) * SPLIT_DELAY_PER_CHAR,
+            SPLIT_DELAY_MAX
+        )
+        segments.append(MessageSegment(text=seg, delay=delay, typing=True))
+    return ConversationResponse(segments=segments)
+
+# ---------------------------------------------------------------------------
+# Multi-message sender
+# Sends each segment with typing indicator and delay between them.
+# ---------------------------------------------------------------------------
+
+async def send_response(
+    response: ConversationResponse,
+    channel: discord.abc.Messageable,
+    *,
+    reply_to: Optional[discord.Message] = None,
+) -> None:
+    """
+    Send a ConversationResponse to a channel.
+    - First segment replies to the triggering message if reply_to is set.
+    - Subsequent segments are plain sends to the channel.
+    - Typing indicator shown before each segment.
+    - Delay between segments simulates natural pacing.
+    """
+    for i, segment in enumerate(response.segments):
+        if segment.typing:
+            async with channel.typing():
+                await asyncio.sleep(segment.delay)
+
+        if i == 0 and reply_to is not None:
+            await reply_to.reply(segment.text)
+        else:
+            await channel.send(segment.text)
 
 # ---------------------------------------------------------------------------
 # Persona JSON structure
@@ -70,42 +223,38 @@ ASSEMBLY_ORDER = [
 ]
 
 def default_persona_json() -> dict:
-    return {field: "" for field in PERSONA_FIELDS}
+    return {f: "" for f in PERSONA_FIELDS}
 
 def load_persona_json() -> dict:
-    """Load structured persona from persona.json."""
     if os.path.exists(AI_PERSONA_JSON_PATH):
         try:
             with open(AI_PERSONA_JSON_PATH, "r", encoding="utf-8") as f:
                 data = json.load(f)
-                # Fill any missing fields
-                for field in PERSONA_FIELDS:
-                    if field not in data:
-                        data[field] = ""
+                for field_name in PERSONA_FIELDS:
+                    if field_name not in data:
+                        data[field_name] = ""
                 return data
         except Exception as e:
             logger.error(f"Persona JSON load error: {e}")
     return default_persona_json()
 
 def save_persona_json(data: dict):
-    os.makedirs(os.path.dirname(AI_PERSONA_JSON_PATH) if os.path.dirname(AI_PERSONA_JSON_PATH) else ".", exist_ok=True)
+    os.makedirs(
+        os.path.dirname(AI_PERSONA_JSON_PATH) if os.path.dirname(AI_PERSONA_JSON_PATH) else ".",
+        exist_ok=True
+    )
     with open(AI_PERSONA_JSON_PATH, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
 
 def assemble_persona(data: dict) -> str:
-    """Assemble structured fields into a single system prompt string."""
     parts = []
-    for field in ASSEMBLY_ORDER:
-        label = PERSONA_LABELS[field]
-        value = data.get(field, "").strip()
-        if value:
-            parts.append(f"[{label}]\n{value}")
-        else:
-            parts.append(f"[{label}]\n(empty)")
+    for f in ASSEMBLY_ORDER:
+        label = PERSONA_LABELS[f]
+        value = data.get(f, "").strip()
+        parts.append(f"[{label}]\n{value}" if value else f"[{label}]\n(empty)")
     return "\n\n".join(parts)
 
 def load_legacy_persona() -> Optional[str]:
-    """Return flat persona.txt content if it exists, else None."""
     if os.path.exists(AI_PERSONA_PATH):
         try:
             with open(AI_PERSONA_PATH, "r", encoding="utf-8") as f:
@@ -127,7 +276,6 @@ LEGACY_DETECTED: bool = False
 
 def _init_persona():
     global PERSONA_DATA, CURRENT_PERSONA, LEGACY_DETECTED
-
     if os.path.exists(AI_PERSONA_JSON_PATH):
         PERSONA_DATA = load_persona_json()
         CURRENT_PERSONA = assemble_persona(PERSONA_DATA)
@@ -135,9 +283,8 @@ def _init_persona():
     else:
         legacy = load_legacy_persona()
         if legacy:
-            # Legacy persona.txt exists but no persona.json — flag for migration
             PERSONA_DATA = default_persona_json()
-            CURRENT_PERSONA = legacy  # use raw until migrated
+            CURRENT_PERSONA = legacy
             LEGACY_DETECTED = True
         else:
             PERSONA_DATA = default_persona_json()
@@ -160,7 +307,10 @@ def load_profiles() -> dict:
     return {}
 
 def save_profiles(profiles: dict):
-    os.makedirs(os.path.dirname(PERSONAS_PATH) if os.path.dirname(PERSONAS_PATH) else ".", exist_ok=True)
+    os.makedirs(
+        os.path.dirname(PERSONAS_PATH) if os.path.dirname(PERSONAS_PATH) else ".",
+        exist_ok=True
+    )
     with open(PERSONAS_PATH, "w", encoding="utf-8") as f:
         json.dump(profiles, f, indent=2, ensure_ascii=False)
 
@@ -178,7 +328,10 @@ def load_config() -> dict:
     return {"prefix": "~"}
 
 def save_config(data: dict):
-    os.makedirs(os.path.dirname(CONFIG_PATH) if os.path.dirname(CONFIG_PATH) else ".", exist_ok=True)
+    os.makedirs(
+        os.path.dirname(CONFIG_PATH) if os.path.dirname(CONFIG_PATH) else ".",
+        exist_ok=True
+    )
     with open(CONFIG_PATH, "w") as f:
         json.dump(data, f, indent=2)
 
@@ -292,7 +445,8 @@ def unsafe_output(text: str) -> bool:
     return any(f in text.lower() for f in OUTPUT_FLAGS)
 
 # ---------------------------------------------------------------------------
-# Core generation
+# Core generation — returns ConversationResponse
+# Raw API errors are never propagated; all failures return neutral messages.
 # ---------------------------------------------------------------------------
 
 async def generate(
@@ -302,7 +456,7 @@ async def generate(
     apply_persona: bool = True,
     instruction_prefix: str = "",
     username: str = "",
-) -> str:
+) -> ConversationResponse:
     await rate_limit()
     prompt = sanitize_prompt(prompt)
 
@@ -332,22 +486,45 @@ async def generate(
         )
 
         if not response or not response.text:
-            return "Empty response."
+            raise MalformedResponseError("Empty response from model.")
 
         text = clean_text(response.text)
 
         if unsafe_output(text):
-            return "Response blocked."
+            logger.warning("Output blocked by safety filter.")
+            return build_response("I can't respond to that.")
 
         if channel_id is not None:
             push_memory(channel_id, "user", user_text, display_text)
             push_memory(channel_id, "model", text, f"{BOT_NAME}: {text}")
 
-        return text
+        return build_response(text)
 
+    except GenerationError:
+        raise  # already classified, let caller handle
     except Exception as e:
-        logger.error(f"Gemini error: {e}")
-        return f"Error: {e}"
+        classified = _classify_error(e)
+        logger.error(f"Gemini error [{type(classified).__name__}]: {e}")
+        raise classified from e
+
+async def safe_generate(
+    prompt: str,
+    **kwargs,
+) -> ConversationResponse:
+    """
+    Wrapper around generate() that never raises.
+    Returns a neutral single-segment response on any error.
+    Used by on_message and command handlers to prevent immersion breaks.
+    """
+    try:
+        return await generate(prompt, **kwargs)
+    except GenerationError as e:
+        msg = _user_facing_error(e)
+        logger.warning(f"safe_generate swallowed error: {type(e).__name__}")
+        return build_response(msg)
+    except Exception as e:
+        logger.error(f"safe_generate unexpected error: {e}")
+        return build_response("Something went wrong. Try again.")
 
 def clean_text(text: str, limit: int = 4000) -> str:
     if len(text) <= limit:
@@ -415,7 +592,7 @@ class PersonaCoreModal(ui.Modal, title="Persona: Core & Background"):
         try:
             save_persona_json(PERSONA_DATA)
             await interaction.response.send_message(
-                "✅ Core & Background saved. Use `/setpersona style` to edit the remaining fields.",
+                "✅ Core & Background saved. Use `/setpersona style` for the remaining fields.",
                 ephemeral=True
             )
         except Exception as e:
@@ -462,10 +639,7 @@ class PersonaStyleModal(ui.Modal, title="Persona: Style & Instructions"):
         CURRENT_PERSONA = assemble_persona(PERSONA_DATA)
         try:
             save_persona_json(PERSONA_DATA)
-            await interaction.response.send_message(
-                "✅ Style & Instructions saved.",
-                ephemeral=True
-            )
+            await interaction.response.send_message("✅ Style & Instructions saved.", ephemeral=True)
         except Exception as e:
             await interaction.response.send_message(f"Save failed: {e}", ephemeral=True)
 
@@ -478,14 +652,10 @@ class SetPersonaGroup(app_commands.Group):
         super().__init__(name="setpersona", description="Edit the bot's persona (Owner only).")
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        # Cast or access the bot instance directly to satisfy type checkers
-        bot = interaction.client
-        if isinstance(bot, commands.Bot):
-            if not await bot.is_owner(interaction.user):
-                await interaction.response.send_message("Owner only.", ephemeral=True)
-                return False
-            return True
-        return False
+        if not await interaction.client.is_owner(interaction.user):
+            await interaction.response.send_message("Owner only.", ephemeral=True)
+            return False
+        return True
 
     @app_commands.command(name="core", description="Edit core personality and background.")
     async def set_core(self, interaction: discord.Interaction):
@@ -508,46 +678,25 @@ class GenAICog(commands.Cog):
     async def cog_unload(self):
         self.bot.tree.remove_command("setpersona")
 
-    # Notify owner on startup if legacy persona.txt detected
-    @commands.Cog.listener()
-    async def on_ready(self):
-        if LEGACY_DETECTED:
-            try:
-                owner = (await self.bot.application_info()).owner
-                await owner.send(
-                    f"⚠️ **{BOT_NAME} detected a legacy `persona.txt` file.**\n\n"
-                    f"The persona system now uses a structured `persona.json` format. "
-                    f"Your existing persona is still active, but to use `/setpersona core` and `/setpersona style`, "
-                    f"you'll need to migrate your content into the new fields.\n\n"
-                    f"Use `/setpersona core` and `/setpersona style` to set up the new format. "
-                    f"Once saved, `persona.json` will take over and `persona.txt` can be removed."
-                )
-            except Exception as e:
-                logger.warning(f"Could not DM owner for legacy persona notice: {e}")
-
-    # on_message: conversation channel listener
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
-        # 1. Ignore self
-        if self.bot.user is None or message.author == self.bot.user:
+        if message.author.bot:
+            return
+        if message.guild is None:
             return
 
-        # 2. Fetch prefixes and ignore command invocations early
         prefixes = await self.bot.get_prefix(message)
         if isinstance(prefixes, str):
             prefixes = (prefixes,)
-        
         if message.content.startswith(tuple(prefixes)):
             return
 
-        # 3. Channel configuration gates
         config = load_config()
         chat_channel_id = config.get("chat_channel_id")
         if not chat_channel_id or message.channel.id != int(chat_channel_id):
             return
 
-        # 4. Determine if the bot should actually respond
-        bot_mentioned = self.bot.user in message.mentions
+        bot_mentioned = self.bot.user in message.mentions if self.bot.user else False
         is_reply_to_bot = (
             message.reference is not None
             and message.reference.resolved is not None
@@ -558,58 +707,49 @@ class GenAICog(commands.Cog):
         if not bot_mentioned and not is_reply_to_bot:
             return
 
-        # Safe extraction of display name before entering async typing context
-        bot_name = self.bot.user.display_name 
+        username = message.author.display_name
+        bot_name = self.bot.user.display_name if self.bot.user else BOT_NAME
+        prompt = message.clean_content.replace(f"@{bot_name}", "").strip()
 
-        # 5. Process and respond safely
-        async with message.channel.typing():
-            username = message.author.display_name
-            prompt = message.clean_content.replace(f"@{bot_name}", "").strip()
-            text = await generate(
-                prompt,
-                channel_id=message.channel.id,
-                username=username,
-            )
-            await message.reply(text)
+        response = await safe_generate(
+            prompt,
+            channel_id=message.channel.id,
+            username=username,
+        )
+        await send_response(response, message.channel, reply_to=message)
 
-    # ~write
+    # ~write — structured output, stateless, single embed (no split)
     @commands.hybrid_command(name='write', help='Ask the AI to write or create something.')
     async def write_cmd(self, ctx, *, query: str):
         if ctx.guild is None:
             await ctx.send("AI commands are not available in DMs.")
             return
         await ctx.defer()
-        async with ctx.typing():
-            text = await generate(
-                query,
-                instruction_prefix="Respond with well-structured, written output. Use formatting where appropriate.",
-            )
-            embed = discord.Embed(
-                title=f"{BOT_NAME} writes...",
-                description=text,
-                color=discord.Color.green()
-            )
-            await ctx.send(embed=embed)
+        response = await safe_generate(
+            query,
+            instruction_prefix="Respond with well-structured, written output. Use formatting where appropriate.",
+        )
+        embed = discord.Embed(
+            title=f"{BOT_NAME} writes...",
+            description=response.first_text(),
+            color=discord.Color.green()
+        )
+        await ctx.send(embed=embed)
 
-    # ~ask
+    # ~ask — conversational, stateless, split messaging enabled
     @commands.hybrid_command(name='ask', help='Ask the AI a question.')
     async def ask_cmd(self, ctx, *, query: str):
         if ctx.guild is None:
             await ctx.send("AI commands are not available in DMs.")
             return
         await ctx.defer()
-        async with ctx.typing():
-            text = await generate(
-                query,
-                instruction_prefix="Answer conversationally and concisely.",
-                username=ctx.author.display_name,
-            )
-            embed = discord.Embed(
-                title=f"{BOT_NAME} answers...",
-                description=text,
-                color=discord.Color.blurple()
-            )
-            await ctx.send(embed=embed)
+        response = await safe_generate(
+            query,
+            instruction_prefix="Answer conversationally and concisely.",
+            username=ctx.author.display_name,
+        )
+        # First segment as reply, rest as follow-ups
+        await send_response(response, ctx.channel, reply_to=ctx.message)
 
     # ~search
     @commands.hybrid_command(name='search', help='Search the web and summarize with AI.')
@@ -618,20 +758,19 @@ class GenAICog(commands.Cog):
             await ctx.send("AI commands are not available in DMs.")
             return
         await ctx.defer()
-        async with ctx.typing():
-            results = await web_search(query)
-            summary = await generate(
-                f"Summarize these search results:\n\n{results}",
-                apply_persona=False,
-            )
-            embed = discord.Embed(
-                title=f"Search: {query}",
-                description=summary,
-                color=discord.Color.blue()
-            )
-            url = f"https://www.google.com/search?q={urllib.parse.quote(query)}"
-            embed.add_field(name="Full results", value=url)
-            await ctx.send(embed=embed)
+        results = await web_search(query)
+        response = await safe_generate(
+            f"Summarize these search results:\n\n{results}",
+            apply_persona=False,
+        )
+        embed = discord.Embed(
+            title=f"Search: {query}",
+            description=response.first_text(),
+            color=discord.Color.blue()
+        )
+        url = f"https://www.google.com/search?q={urllib.parse.quote(query)}"
+        embed.add_field(name="Full results", value=url)
+        await ctx.send(embed=embed)
 
     # Persona lock / unlock
     @commands.hybrid_command(name='personalock', help='Lock the persona to prevent changes (Owner only).')
@@ -670,7 +809,6 @@ class GenAICog(commands.Cog):
             await ctx.send(f"No profile named `{key}`. Use `/personalist` to see saved profiles.")
             return
         loaded = profiles[key]
-        # Support both old flat-string profiles and new structured ones
         if isinstance(loaded, str):
             CURRENT_PERSONA = loaded
             PERSONA_DATA = default_persona_json()
@@ -689,6 +827,18 @@ class GenAICog(commands.Cog):
             return
         names = "\n".join(f"- `{k}`" for k in profiles)
         await ctx.send(f"Saved profiles:\n{names}", ephemeral=True if ctx.interaction else False)
+
+    @commands.hybrid_command(name='personadelete', help='Delete a saved persona profile (Owner only).')
+    @commands.is_owner()
+    async def persona_delete(self, ctx, name: str):
+        profiles = load_profiles()
+        key = name.lower()
+        if key not in profiles:
+            await ctx.send(f"No profile named `{key}`.")
+            return
+        del profiles[key]
+        save_profiles(profiles)
+        await ctx.send(f"Deleted profile `{key}`.", ephemeral=True if ctx.interaction else False)
 
     # /setchannel + /clearchannel
     @commands.hybrid_command(name='setchannel', help='Set the AI conversation channel (Admin only).')
@@ -714,21 +864,12 @@ class GenAICog(commands.Cog):
         last = LAST_DEBUG.get(ctx.channel.id, "*(no prompt sent in this channel yet)*")
         locked = "Yes" if PERSONA_LOCKED else "No"
         legacy = "Yes — migrate via `/setpersona core` and `/setpersona style`" if LEGACY_DETECTED else "No"
-
         embed = discord.Embed(title="Persona Debug", color=discord.Color.yellow())
         embed.add_field(name="Locked", value=locked, inline=True)
         embed.add_field(name="Model", value=MODEL_NAME, inline=True)
         embed.add_field(name="Legacy Mode", value=legacy, inline=True)
-        embed.add_field(
-            name="Assembled Persona",
-            value=f"```{CURRENT_PERSONA[:900]}```",
-            inline=False
-        )
-        embed.add_field(
-            name="Last Prompt (this channel)",
-            value=f"```{last[:900]}```",
-            inline=False
-        )
+        embed.add_field(name="Assembled Persona", value=f"```{CURRENT_PERSONA[:900]}```", inline=False)
+        embed.add_field(name="Last Prompt (this channel)", value=f"```{last[:900]}```", inline=False)
         await ctx.send(embed=embed, ephemeral=True if ctx.interaction else False)
 
     # /clearmemory
