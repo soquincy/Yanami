@@ -31,7 +31,7 @@ class UtilCog(commands.Cog):
         self.bot = bot
 
     # Kick comamnd
-    @commands.hybrid_command(name='kick', help='Kicks a member from the server.')
+    @commands.hybrid_command(name='kick', help='Kicks a member from the server.') # Deadass?
     @app_commands.describe(member="The member to kick.", reason="Reason for the kick.")
     @commands.has_permissions(kick_members=True)
     @commands.bot_has_permissions(kick_members=True)
@@ -58,13 +58,14 @@ class UtilCog(commands.Cog):
             await ctx.send("I don't have permission to kick this member.")
 
     # Purge (mass delete messages) command
-    @commands.hybrid_command(name='purge', help='Deletes a specified number of messages (1-100).')
-    @app_commands.describe(amount="The number of messages to delete (1-100).")
+    @commands.hybrid_command(name='purge', help='Deletes a specified number of messages (1-1000).')
+    # Note: cannot delete messages older than 14 days due to Discord limitations, but that is handled by the API and doesn't need to be checked for manually.
+    @app_commands.describe(amount="The number of messages to delete (1-1000).")
     @commands.has_permissions(manage_messages=True)
     @commands.bot_has_permissions(manage_messages=True)
     async def purge_cmd(self, ctx, amount: int):
         await ctx.defer(ephemeral=True) # Ephemeral so the 'thinking' state is private
-        if 1 <= amount <= 100:
+        if 1 <= amount <= 1000:
             try:
                 deleted = await ctx.channel.purge(limit=amount + 1)
                 await ctx.send(f"Poof! Deleted {len(deleted) - 1} message(s).", delete_after=5)
@@ -72,7 +73,7 @@ class UtilCog(commands.Cog):
                 logger.error(f"Failed to purge: {e}")
                 await ctx.send("An error occurred while deleting messages.")
         else:
-            await ctx.send("Please provide a number between 1 and 100.")
+            await ctx.send("Please provide a number between 1 and 1000.")
 
     # Ban command
     @commands.hybrid_command(name='ban', help='Bans a member from the server.')
@@ -157,6 +158,9 @@ class UtilCog(commands.Cog):
 
         await member.timeout(None, reason=f"Removed by {ctx.author}")
         await ctx.send(f"Removed timeout for {member.mention}.")
+
+# It is what it is: the most basic utility commands that every bot should have.
+# Kick, ban, unban, timeout, removetimeout, purge, whatever. All with proper permission checks and error handling.
 
 async def setup(bot):
     await bot.add_cog(UtilCog(bot))

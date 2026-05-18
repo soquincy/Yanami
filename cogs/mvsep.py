@@ -1,4 +1,9 @@
 # cogs/mvsep.py: MVSEP audio source separation (vocals/instrumental via BS Roformer)
+# YES I make mashups and I need this shut up. You may disable this cog at line 50 at main.py if you don't care about separating audio;
+# But hey it's a fun party trick and it works surprisingly well for a free API.
+
+# Current problem: no way to get progress updates or queue position; no way to cancel; links expire after some time; only one job at a time on free tier.
+# But hey it works and it's free so I'm not complaining. My broke ass appreciates it.
 
 import os
 import asyncio
@@ -124,7 +129,7 @@ class MVSepCog(commands.Cog):
         raise TimeoutError("Job timed out after 10 minutes.")
 
     # ------------------------------------------------------------------
-    # Input resolver: attachment > direct URL > yt-dlp
+    # Input resolver: attachment > direct URL > yt-dlp: I'm starting to think that this dosen't support direct URLs. May fix this later.
     # ------------------------------------------------------------------
 
     async def _resolve_input(
@@ -179,7 +184,7 @@ class MVSepCog(commands.Cog):
         return local, None
 
     # ------------------------------------------------------------------
-    # Command
+    # Actual command
     # ------------------------------------------------------------------
 
     @commands.hybrid_command(
@@ -284,6 +289,6 @@ class MVSepCog(commands.Cog):
             logger.error(f"Separate error: {error}")
             await ctx.send(f"❌ Unexpected error: {error}")
 
-
+# Oh well that was unintuitive...
 async def setup(bot):
     await bot.add_cog(MVSepCog(bot))

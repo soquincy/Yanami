@@ -1,4 +1,5 @@
 # cogs/help.py: Help index
+# Obviosly if you need help this is the cog to go to. Lolz.
 
 import os
 import discord

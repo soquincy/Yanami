@@ -183,17 +183,6 @@ Licensed under the **MIT License**. See the [LICENSE](LICENSE) file for details.
 
 ## Roadmap
 
-### Short-term
-
-* **Codebase modularization** — `cogs/genai.py` has grown past 1,000 lines. Planned split into focused utility modules under `utils/`:
-  * `utils/generation.py` — `generate`, `safe_generate`, `build_response`, `ConversationResponse`, all error classes
-  * `utils/persona.py` — persona data layer, modals, `SetPersonaGroup`
-  * `utils/memory.py` — channel memory, summarization, `push_memory`
-  * `utils/security.py` — injection detection, rate limiter, output sanitization
-  * `utils/config.py` — `load_config`, `save_config`, embed footer helper
-  * `utils/search.py` — `web_search`
-  * `cogs/genai.py` retains only `GenAICog` wiring (~300 lines)
-
 ### Medium-term
 
 * **True long-term memory** — per-user, per-guild memory persisted to disk with auto-extraction and importance scoring (currently memory is in-session only)

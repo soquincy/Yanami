@@ -1,4 +1,6 @@
 {
     "prefix": "~",
+    "_comment":
+    "You may change this prefix via the ~prefix command in Discord. This is just the default prefix and it will be overridden here if you change it in Discord.",
     "chat_channel_id": null
 }
