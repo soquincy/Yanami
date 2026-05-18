@@ -111,11 +111,11 @@ def _classify_error(e: Exception) -> GenerationError:
     return GenerationError(str(e))
 
 _ERROR_MESSAGES: dict[type, str] = {
-    RateLimitError:         "I'm a little overwhelmed right now — give me a moment.",
-    TimeoutGenerationError: "That took too long. Try again?",
-    TransientError:         "Something hiccupped on my end. Try again in a bit.",
-    MalformedResponseError: "I got confused by that one. Try rephrasing?",
-    GenerationError:        "Something went wrong. Try again.",
+    RateLimitError:         "Take it easy! I'm getting a lot of requests. Try again in a minute or so.",
+    TimeoutGenerationError: "That took long. Try again?",
+    TransientError:         "Oops! Something went wrong on my end. Try again.",
+    MalformedResponseError: "I didn't understand that. Try again.",
+    GenerationError:        "Oops! Something went wrong. Try again.",
 }
 
 def _user_facing_error(e: GenerationError) -> str:
