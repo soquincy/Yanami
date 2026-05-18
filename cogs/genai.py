@@ -111,11 +111,11 @@ def _classify_error(e: Exception) -> GenerationError:
     return GenerationError(str(e))
 
 _ERROR_MESSAGES: dict[type, str] = {
-    RateLimitError:         "Take it easy! I'm getting a lot of requests. Try again in a minute or so.",
-    TimeoutGenerationError: "That took long. Try again?",
-    TransientError:         "Oops! Something went wrong on my end. Try again.",
-    MalformedResponseError: "I didn't understand that. Try again.",
-    GenerationError:        "Oops! Something went wrong. Try again.",
+    RateLimitError:         "I'm a little overwhelmed right now — give me a moment.",
+    TimeoutGenerationError: "That took too long. Try again?",
+    TransientError:         "Something hiccupped on my end. Try again in a bit.",
+    MalformedResponseError: "I got confused by that one. Try rephrasing?",
+    GenerationError:        "Something went wrong. Try again.",
 }
 
 def _user_facing_error(e: GenerationError) -> str:
@@ -167,25 +167,28 @@ async def send_response(
     *,
     reply_to: Optional[discord.Message] = None,
 ) -> None:
+    """
+    Send a ConversationResponse segment by segment.
+    - First segment replies to the triggering message (if any).
+    - Subsequent segments are sent as normal channel messages.
+    - Each segment gets its own typing indicator + delay for a natural feel.
+    """
     if not response.segments:
         return
 
-    full_text = "\n\n".join(segment.text for segment in response.segments if segment.text.strip())
-
-    if not full_text.strip():
+    segments = [s for s in response.segments if s.text.strip()]
+    if not segments:
         return
 
-    any_typing = any(segment.typing for segment in response.segments)
-    total_delay = min(sum(segment.delay for segment in response.segments if segment.typing), 3.0)
+    for i, segment in enumerate(segments):
+        if segment.typing and segment.delay > 0:
+            async with channel.typing():
+                await asyncio.sleep(segment.delay)
 
-    if any_typing and total_delay > 0:
-        async with channel.typing():
-            await asyncio.sleep(total_delay)
-
-    if reply_to is not None:
-        await reply_to.reply(full_text)
-    else:
-        await channel.send(full_text)
+        if i == 0 and reply_to is not None:
+            await reply_to.reply(segment.text)
+        else:
+            await channel.send(segment.text)
 
 # ---------------------------------------------------------------------------
 # Persona JSON structure
