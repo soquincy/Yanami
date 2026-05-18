@@ -4,6 +4,7 @@
 import os
 import re
 import json
+import random
 import asyncio
 import logging
 import aiohttp
@@ -31,15 +32,22 @@ AI_PERSONA_PATH       = os.getenv("AI_PERSONA_FILE", "/etc/secrets/persona.txt")
 AI_PERSONA_JSON_PATH  = os.getenv("AI_PERSONA_JSON_FILE", "/etc/secrets/persona.json")
 CONFIG_PATH           = os.getenv("CONFIG_FILE_PATH", "/etc/secrets/config.json")
 PERSONAS_PATH         = os.getenv("AI_PERSONAS_FILE", "/etc/secrets/personas.json")
-MODEL_NAME            = "gemini-flash-lite-latest"  # you may also use any model available in your Google Cloud project, e.g. gemini-flash-latest, or even gemma-*
+MODEL_NAME            = "gemini-flash-lite-latest"
 MEMORY_LIMIT          = 5
 SUMMARY_PROMPT        = "Summarize this conversation in 2-3 sentences, keeping key context only:"
 
 # Split messaging config
-SPLIT_MIN_LENGTH  = 280   # chars — responses shorter than this are never split
-SPLIT_DELAY_BASE  = 1.2   # seconds between segments
-SPLIT_DELAY_PER_CHAR = 0.012  # additional delay per char in segment (typing realism)
-SPLIT_DELAY_MAX   = 3.5   # cap per segment
+SPLIT_MIN_LENGTH     = 280
+SPLIT_DELAY_BASE     = 1.2
+SPLIT_DELAY_PER_CHAR = 0.012
+SPLIT_DELAY_MAX      = 3.5
+
+# Debounce config
+DEBOUNCE_SECONDS = 1.2   # wait this long after last message before responding
+
+# Autonomy config
+FREQUENCY_CHANCE = {"low": 0.04, "default": 0.10, "high": 0.20}
+AUTONOMY_COOLDOWN_SECONDS = 120
 
 if not GOOGLE_API_KEY:
     raise EnvironmentError("GOOGLE_API_KEY missing.")
@@ -51,7 +59,6 @@ client = genai.Client(api_key=GOOGLE_API_KEY)
 
 # ---------------------------------------------------------------------------
 # Structured response types
-# Spec from handoff doc: ConversationResponse -> list[MessageSegment]
 # ---------------------------------------------------------------------------
 
 @dataclass
@@ -59,41 +66,39 @@ class MessageSegment:
     text: str
     delay: float = SPLIT_DELAY_BASE
     typing: bool = True
-    attachment: Optional[str] = None   # future: file/image ref
+    attachment: Optional[str] = None
 
 @dataclass
 class ConversationResponse:
     segments: list[MessageSegment] = field(default_factory=list)
     reactions: list[str] = field(default_factory=list)
-    suggested_gif: Optional[str] = None  # stub — media awareness layer (future)
+    suggested_gif: Optional[str] = None
 
     @property
     def is_empty(self) -> bool:
         return not self.segments
 
     def first_text(self) -> str:
-        """Fallback for callers that only need the raw text."""
         return " ".join(s.text for s in self.segments)
 
 # ---------------------------------------------------------------------------
 # Error classification
-# Per spec: never expose raw API errors to Discord users
 # ---------------------------------------------------------------------------
 
 class GenerationError(Exception):
-    """Base for all generation errors."""
+    pass
 
 class TransientError(GenerationError):
-    """Temporary API failure — safe to retry."""
+    pass
 
 class RateLimitError(GenerationError):
-    """Rate limit hit."""
+    pass
 
 class MalformedResponseError(GenerationError):
-    """Model returned something unusable."""
+    pass
 
 class TimeoutGenerationError(GenerationError):
-    """Request timed out."""
+    pass
 
 def _classify_error(e: Exception) -> GenerationError:
     msg = str(e).lower()
@@ -105,13 +110,12 @@ def _classify_error(e: Exception) -> GenerationError:
         return TransientError(str(e))
     return GenerationError(str(e))
 
-# User-facing neutral messages per error class
 _ERROR_MESSAGES: dict[type, str] = {
-    RateLimitError:          "I'm a little overwhelmed right now — give me a moment.",
-    TimeoutGenerationError:  "That took too long. Try again?",
-    TransientError:          "Something hiccupped on my end. Try again in a bit.",
-    MalformedResponseError:  "I got confused by that one. Try rephrasing?",
-    GenerationError:         "Something went wrong. Try again.",
+    RateLimitError:         "I'm a little overwhelmed right now — give me a moment.",
+    TimeoutGenerationError: "That took too long. Try again?",
+    TransientError:         "Something hiccupped on my end. Try again in a bit.",
+    MalformedResponseError: "I got confused by that one. Try rephrasing?",
+    GenerationError:        "Something went wrong. Try again.",
 }
 
 def _user_facing_error(e: GenerationError) -> str:
@@ -119,27 +123,15 @@ def _user_facing_error(e: GenerationError) -> str:
 
 # ---------------------------------------------------------------------------
 # Text splitter
-# Splits at paragraph breaks first, then sentence boundaries.
-# Returns list of non-empty strings.
 # ---------------------------------------------------------------------------
 
 def split_into_segments(text: str) -> list[str]:
-    """
-    Split response text into natural message segments.
-    Strategy (in order):
-      1. Split on double newlines (paragraph breaks)
-      2. If any segment is still very long, split at sentence boundary
-    Never splits if total length < SPLIT_MIN_LENGTH.
-    """
     if len(text) < SPLIT_MIN_LENGTH:
         return [text]
 
-    # Step 1: paragraph split
     paragraphs = [p.strip() for p in re.split(r"\n{2,}", text) if p.strip()]
     if len(paragraphs) <= 1:
-        # No paragraph breaks — try sentence split
         sentences = re.split(r"(?<=[.!?])\s+", text)
-        # Group sentences into chunks of ~200 chars
         chunks: list[str] = []
         current = ""
         for s in sentences:
@@ -155,7 +147,6 @@ def split_into_segments(text: str) -> list[str]:
     return paragraphs
 
 def build_response(text: str) -> ConversationResponse:
-    """Convert raw text into a ConversationResponse with timed segments."""
     segments_text = split_into_segments(text)
     segments = []
     for seg in segments_text:
@@ -168,7 +159,6 @@ def build_response(text: str) -> ConversationResponse:
 
 # ---------------------------------------------------------------------------
 # Multi-message sender
-# Sends each segment with typing indicator and delay between them.
 # ---------------------------------------------------------------------------
 
 async def send_response(
@@ -177,30 +167,21 @@ async def send_response(
     *,
     reply_to: Optional[discord.Message] = None,
 ) -> None:
-    """
-    Send a ConversationResponse to a channel.
-    - Combines all text segments into a single message to prevent overreplying.
-    - Calculates a single combined typing delay based on the segments.
-    """
     if not response.segments:
         return
 
-    # Combine all text segments into a single string
     full_text = "\n\n".join(segment.text for segment in response.segments if segment.text.strip())
-    
+
     if not full_text.strip():
         return
 
-    # Determine if any segment requested typing, and calculate a reasonable single delay
     any_typing = any(segment.typing for segment in response.segments)
     total_delay = min(sum(segment.delay for segment in response.segments if segment.typing), 3.0)
 
-    # Show typing indicator once if needed
     if any_typing and total_delay > 0:
         async with channel.typing():
             await asyncio.sleep(total_delay)
 
-    # Send the consolidated text as a single response
     if reply_to is not None:
         await reply_to.reply(full_text)
     else:
@@ -219,10 +200,10 @@ PERSONA_FIELDS = [
 ]
 
 PERSONA_LABELS = {
-    "core_personality":     "Core Personality & Traits",
-    "background":           "Background & History",
-    "beliefs":              "Beliefs, Likes & Dislikes",
-    "language":             "Language & Communication Style",
+    "core_personality":    "Core Personality & Traits",
+    "background":          "Background & History",
+    "beliefs":             "Beliefs, Likes & Dislikes",
+    "language":            "Language & Communication Style",
     "system_instructions": "System Instructions",
 }
 
@@ -364,7 +345,7 @@ def get_memory(channel_id: int) -> deque:
 def memory_to_contents(channel_id: int) -> list:
     contents = []
     summary = channel_summary.get(channel_id)
-    
+
     if summary:
         contents.append(types.Content(
             role="user",
@@ -374,18 +355,16 @@ def memory_to_contents(channel_id: int) -> list:
             role="model",
             parts=[types.Part(text="Understood, I have context from earlier.")]
         ))
-        
-    # Merge consecutive roles to maintain strict alternating turns
+
     for entry in get_memory(channel_id):
         if contents and contents[-1].role == entry["role"]:
-            # Append text to the existing turn instead of creating a new one
             contents[-1].parts[0].text += f"\n{entry['text']}"
         else:
             contents.append(types.Content(
                 role=entry["role"],
                 parts=[types.Part(text=entry["text"])]
             ))
-            
+
     return contents
 
 async def maybe_summarize(channel_id: int):
@@ -465,8 +444,7 @@ def unsafe_output(text: str) -> bool:
     return any(f in text.lower() for f in OUTPUT_FLAGS)
 
 # ---------------------------------------------------------------------------
-# Core generation — returns ConversationResponse
-# Raw API errors are never propagated; all failures return neutral messages.
+# Core generation
 # ---------------------------------------------------------------------------
 
 async def generate(
@@ -489,11 +467,9 @@ async def generate(
 
     parts = []
 
-    # always include text (even if empty prompt for image-only queries)
     if user_text:
         parts.append(types.Part(text=user_text))
 
-    # attach image if present
     if image_bytes:
         parts.append(
             types.Part.from_bytes(
@@ -543,7 +519,7 @@ async def generate(
         return build_response(text)
 
     except GenerationError:
-        raise  # already classified, let caller handle
+        raise
     except Exception as e:
         classified = _classify_error(e)
         logger.error(f"Gemini error [{type(classified).__name__}]: {e}")
@@ -553,11 +529,6 @@ async def safe_generate(
     prompt: str,
     **kwargs,
 ) -> ConversationResponse:
-    """
-    Wrapper around generate() that never raises.
-    Returns a neutral single-segment response on any error.
-    Used by on_message and command handlers to prevent immersion breaks.
-    """
     try:
         return await generate(prompt, **kwargs)
     except GenerationError as e:
@@ -716,7 +687,6 @@ class SetPersonaGroup(app_commands.Group):
                 await interaction.response.send_message("Owner only.", ephemeral=True)
                 return False
             return True
-        
         await interaction.response.send_message("Owner check failed.", ephemeral=True)
         return False
 
@@ -729,8 +699,21 @@ class SetPersonaGroup(app_commands.Group):
         await interaction.response.send_modal(PersonaStyleModal(PERSONA_DATA))
 
 # ---------------------------------------------------------------------------
+# Embed footer helper
+# ---------------------------------------------------------------------------
+
+def _embed_footer(author_display: str, query: str, max_query_len: int = 80) -> str:
+    """Returns a footer string: 'Asked by <name> • <truncated query>'"""
+    truncated = query if len(query) <= max_query_len else query[:max_query_len - 1] + "…"
+    return f"Asked by {author_display}  •  {truncated}"
+
+# ---------------------------------------------------------------------------
 # Cog
 # ---------------------------------------------------------------------------
+
+# Module-level state for debounce and autonomy
+_pending_responses: dict[int, asyncio.Task] = {}   # user_id -> pending task
+_autonomy_cooldown: dict[int, float] = {}           # channel_id -> last fire timestamp
 
 class GenAICog(commands.Cog):
     def __init__(self, bot: commands.Bot):
@@ -740,69 +723,110 @@ class GenAICog(commands.Cog):
 
     async def cog_unload(self):
         self.bot.tree.remove_command("setpersona")
+        # Cancel any pending debounce tasks on unload
+        for task in _pending_responses.values():
+            task.cancel()
+        _pending_responses.clear()
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
-        # Okay let's get this party started.
-        KONATA_ID = 1482682376655208548 
+        KONATA_ID = 1482682376655208548
 
-        # Allow Konata through, but block all other bot accounts
         if message.author.bot and message.author.id != KONATA_ID:
             return
 
         if message.guild is None:
             return
 
-        # FIX FOR OLDER DISCORD.PY: Filter out system messages
-        # Only process normal text messages and replies
         if message.type not in (discord.MessageType.default, discord.MessageType.reply):
             return
 
-        # IMPORTANT FIX: ignore application-command / hybrid interactions
         if getattr(message, "interaction_metadata", None):
             return
 
         prefix = await self.bot.get_prefix(message)
-
-        if isinstance(prefix, str):
-            prefixes = [prefix]
-        else:
-            prefixes = prefix
-
+        prefixes = [prefix] if isinstance(prefix, str) else prefix
         if any(message.content.startswith(p) for p in prefixes):
             return
 
         ctx = await self.bot.get_context(message)
-
         if ctx.valid:
             return
 
-        image_bytes, image_mime = await _extract_image(message)
+        # ---------------------------------------------------------------
+        # Autonomy mode check
+        # Fires independently of the normal response path — the bot can
+        # chime in even if the message wasn't directed at it.
+        # ---------------------------------------------------------------
+        config = load_config()
+        autonomy_on = config.get("autonomy", False)
 
-        response = await safe_generate(
-            message.content or "What’s in this image?",
-            channel_id=message.channel.id,
-            username=message.author.display_name,
-            image_bytes=image_bytes,
-            image_mime=image_mime,
-        )
+        if autonomy_on and not message.author.bot and message.content.strip():
+            frequency = config.get("autonomy_frequency", "default")
+            chance = FREQUENCY_CHANCE.get(frequency, 0.10)
+            now = time.time()
+            last_fire = _autonomy_cooldown.get(message.channel.id, 0)
 
-        await send_response(
-            response,
-            message.channel,
-            reply_to=message,
-        )
+            if now - last_fire > AUTONOMY_COOLDOWN_SECONDS and random.random() < chance:
+                _autonomy_cooldown[message.channel.id] = now
+                logger.info(f"Autonomy firing in channel {message.channel.id}")
+                image_bytes, image_mime = await _extract_image(message)
+                response = await safe_generate(
+                    message.content,
+                    channel_id=message.channel.id,
+                    username=message.author.display_name,
+                    image_bytes=image_bytes,
+                    image_mime=image_mime,
+                )
+                await send_response(response, message.channel)
+                return  # don't double-respond in the same pass
 
-    # ~write — structured output, stateless, single embed (no split)
+        # ---------------------------------------------------------------
+        # Debounce: cancel any existing pending response for this user,
+        # then wait DEBOUNCE_SECONDS before actually generating.
+        # This prevents double-replies when a user sends rapid messages.
+        # ---------------------------------------------------------------
+        user_id = message.author.id
+
+        if user_id in _pending_responses:
+            _pending_responses[user_id].cancel()
+            logger.debug(f"Debounce: cancelled pending task for user {user_id}")
+
+        # Snapshot what we need before the async gap
+        content_snapshot   = message.content
+        channel_snapshot   = message.channel
+        username_snapshot  = message.author.display_name
+        message_snapshot   = message
+
+        async def debounced_respond():
+            try:
+                await asyncio.sleep(DEBOUNCE_SECONDS)
+                image_bytes, image_mime = await _extract_image(message_snapshot)
+                response = await safe_generate(
+                    content_snapshot or "What's in this image?",
+                    channel_id=channel_snapshot.id,
+                    username=username_snapshot,
+                    image_bytes=image_bytes,
+                    image_mime=image_mime,
+                )
+                await send_response(response, channel_snapshot, reply_to=message_snapshot)
+            except asyncio.CancelledError:
+                logger.debug(f"Debounce: task cancelled for user {user_id}")
+            finally:
+                _pending_responses.pop(user_id, None)
+
+        _pending_responses[user_id] = asyncio.create_task(debounced_respond())
+
+    # -----------------------------------------------------------------------
+    # ~write
+    # -----------------------------------------------------------------------
     @commands.hybrid_command(name='write', help='Ask the AI to write or create something.')
     async def write_cmd(self, ctx, *, query: str):
         if ctx.guild is None:
             await ctx.send("AI commands are not available in DMs.")
             return
         await ctx.defer()
-
         image_bytes, image_mime = await _extract_image(ctx.message)
-
         response = await safe_generate(
             query,
             instruction_prefix=(
@@ -820,17 +844,18 @@ class GenAICog(commands.Cog):
             description=response.first_text(),
             color=discord.Color.green()
         )
+        embed.set_footer(text=_embed_footer(ctx.author.display_name, query))
         await ctx.send(embed=embed)
 
-    # ~ask — conversational, stateless, split messaging enabled
+    # -----------------------------------------------------------------------
+    # ~ask
+    # -----------------------------------------------------------------------
     @commands.hybrid_command(name='ask', help='Ask the AI a question.')
     async def ask_cmd(self, ctx, *, query: str):
         if ctx.guild is None:
             await ctx.send("AI commands are not available in DMs.")
             return
-
         image_bytes, image_mime = await _extract_image(ctx.message)
-
         response = await safe_generate(
             query,
             instruction_prefix=(
@@ -842,26 +867,24 @@ class GenAICog(commands.Cog):
             image_bytes=image_bytes,
             image_mime=image_mime,
         )
-
         embed = discord.Embed(
             title=f"{BOT_NAME} answers...",
             description=response.first_text(),
             color=discord.Color.blue()
         )
-
+        embed.set_footer(text=_embed_footer(ctx.author.display_name, query))
         await ctx.send(embed=embed)
 
+    # -----------------------------------------------------------------------
     # ~search
+    # -----------------------------------------------------------------------
     @commands.hybrid_command(name='search', help='Search the web and summarize with AI.')
     async def search_cmd(self, ctx, *, query: str):
         if ctx.guild is None:
             await ctx.send("AI commands are not available in DMs.")
             return
-
         await ctx.defer()
-
         results = await web_search(query)
-
         response = await safe_generate(
             f"Summarize these search results:\n\n{results}",
             apply_persona=False,
@@ -871,24 +894,20 @@ class GenAICog(commands.Cog):
                 "Keep structure readable in Discord embeds."
             )
         )
-
-        text = response.first_text()
-
-        # normalize spacing
-        text = text.replace("### ", "\n\n")
-
+        text = response.first_text().replace("### ", "\n\n")
         embed = discord.Embed(
             title=f"Search: {query}",
             description=text[:4096],
             color=discord.Color.blue()
         )
-
         url = f"https://www.google.com/search?q={urllib.parse.quote(query)}"
         embed.add_field(name="Full results", value=url, inline=False)
-
+        embed.set_footer(text=_embed_footer(ctx.author.display_name, query))
         await ctx.send(embed=embed)
 
+    # -----------------------------------------------------------------------
     # Persona lock / unlock
+    # -----------------------------------------------------------------------
     @commands.hybrid_command(name='personalock', help='Lock the persona to prevent changes (Owner only).')
     @commands.is_owner()
     async def persona_lock(self, ctx):
@@ -903,7 +922,9 @@ class GenAICog(commands.Cog):
         PERSONA_LOCKED = False
         await ctx.send("Persona unlocked.", ephemeral=True if ctx.interaction else False)
 
+    # -----------------------------------------------------------------------
     # Persona profiles
+    # -----------------------------------------------------------------------
     @commands.hybrid_command(name='personasave', help='Save current persona as a named profile (Owner only).')
     @commands.is_owner()
     async def persona_save(self, ctx, name: str):
@@ -956,7 +977,9 @@ class GenAICog(commands.Cog):
         save_profiles(profiles)
         await ctx.send(f"Deleted profile `{key}`.", ephemeral=True if ctx.interaction else False)
 
+    # -----------------------------------------------------------------------
     # /setchannel + /clearchannel
+    # -----------------------------------------------------------------------
     @commands.hybrid_command(name='setchannel', help='Set the AI conversation channel (Admin only).')
     @commands.has_permissions(administrator=True)
     async def set_channel(self, ctx, channel: discord.TextChannel):
@@ -973,28 +996,82 @@ class GenAICog(commands.Cog):
         save_config(config)
         await ctx.send("Conversation channel cleared.")
 
+    # -----------------------------------------------------------------------
     # /debugpersona
+    # -----------------------------------------------------------------------
     @commands.hybrid_command(name='debugpersona', help='Show active persona and last prompt (Owner only).')
     @commands.is_owner()
     async def debug_persona(self, ctx):
         last = LAST_DEBUG.get(ctx.channel.id, "*(no prompt sent in this channel yet)*")
         locked = "Yes" if PERSONA_LOCKED else "No"
         legacy = "Yes — migrate via `/setpersona core` and `/setpersona style`" if LEGACY_DETECTED else "No"
+        config = load_config()
+        autonomy_status = "On" if config.get("autonomy", False) else "Off"
+        autonomy_freq = config.get("autonomy_frequency", "default")
         embed = discord.Embed(title="Persona Debug", color=discord.Color.yellow())
         embed.add_field(name="Locked", value=locked, inline=True)
         embed.add_field(name="Model", value=MODEL_NAME, inline=True)
         embed.add_field(name="Legacy Mode", value=legacy, inline=True)
+        embed.add_field(name="Autonomy", value=f"{autonomy_status} ({autonomy_freq})", inline=True)
         embed.add_field(name="Assembled Persona", value=f"```{CURRENT_PERSONA[:900]}```", inline=False)
         embed.add_field(name="Last Prompt (this channel)", value=f"```{last[:900]}```", inline=False)
         await ctx.send(embed=embed, ephemeral=True if ctx.interaction else False)
 
+    # -----------------------------------------------------------------------
     # /clearmemory
+    # -----------------------------------------------------------------------
     @commands.hybrid_command(name='clearmemory', help='Clear conversation memory for this channel (Admin only).')
     @commands.has_permissions(administrator=True)
     async def clear_memory(self, ctx):
         channel_memory.pop(ctx.channel.id, None)
         channel_summary.pop(ctx.channel.id, None)
         await ctx.send("Memory cleared for this channel.")
+
+    # -----------------------------------------------------------------------
+    # /autonomy
+    # -----------------------------------------------------------------------
+    @app_commands.command(name="autonomy", description="Control autonomous mode (Admin only).")
+    @app_commands.describe(
+        action="on / off / frequency",
+        frequency="low / default / high — only used when action is 'frequency'"
+    )
+    @app_commands.checks.has_permissions(administrator=True)
+    async def autonomy_cmd(
+        self,
+        interaction: discord.Interaction,
+        action: str,
+        frequency: Optional[str] = None,
+    ):
+        config = load_config()
+        action = action.lower().strip()
+
+        if action == "on":
+            config["autonomy"] = True
+            save_config(config)
+            await interaction.response.send_message("Autonomy mode enabled.", ephemeral=True)
+
+        elif action == "off":
+            config["autonomy"] = False
+            save_config(config)
+            await interaction.response.send_message("Autonomy mode disabled.", ephemeral=True)
+
+        elif action == "frequency":
+            if frequency not in ("low", "default", "high"):
+                await interaction.response.send_message(
+                    "Frequency must be `low`, `default`, or `high`.", ephemeral=True
+                )
+                return
+            config["autonomy_frequency"] = frequency
+            save_config(config)
+            await interaction.response.send_message(
+                f"Autonomy frequency set to `{frequency}`.", ephemeral=True
+            )
+
+        else:
+            await interaction.response.send_message(
+                "Unknown action. Use `on`, `off`, or `frequency`.", ephemeral=True
+            )
+
 
 async def setup(bot):
     await bot.add_cog(GenAICog(bot))

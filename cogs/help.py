@@ -52,8 +52,8 @@ class HelpCog(commands.Cog):
                     media_cmds.append(f"`{cmd.name}` - {cmd.help or 'No description'}")
                 elif cmd.name in [
                     'personalock', 'personaunlock', 'personasave',
-                    'personaload', 'personalist', 'debugpersona',
-                    'setchannel', 'clearchannel', 'clearmemory',
+                    'personaload', 'personalist', 'personadelete',
+                    'debugpersona', 'setchannel', 'clearchannel', 'clearmemory',
                 ]:
                     ai_cmds.append(f"`{cmd.name}` - {cmd.help or 'No description'}")
 
@@ -68,7 +68,11 @@ class HelpCog(commands.Cog):
             if ai_cmds:
                 embed.add_field(
                     name="🤖 AI Persona",
-                    value="\n".join(ai_cmds) + "\n`/setpersona core` `/setpersona style` — Edit persona (Owner only)",
+                    value=(
+                        "\n".join(ai_cmds)
+                        + "\n`/setpersona core` `/setpersona style` — Edit persona (Owner only)"
+                        + "\n`/autonomy on` `/autonomy off` `/autonomy frequency` — Autonomous mode (Admin only)"
+                    ),
                     inline=False
                 )
 
