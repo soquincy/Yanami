@@ -1,0 +1,300 @@
+# utils/generation.py: Core AI generation pipeline, response types, and message sender.
+# This module handles all interactions with the Gemini API, including prompt assembly, response parsing, error handling, and rate limiting.
+
+import os
+import re
+import asyncio
+import logging
+import time
+from dataclasses import dataclass, field
+from typing import Optional
+
+import discord
+from dotenv import load_dotenv
+from google import genai
+from google.genai import types
+
+from utils.memory import memory_to_contents, push_memory
+from utils.security import sanitize_prompt, unsafe_output
+from utils.config import LAST_DEBUG
+
+load_dotenv()
+
+logger = logging.getLogger("FreesonaBot")
+
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
+BOT_NAME       = os.getenv("BOT_NAME", "Bot")
+MODEL_NAME     = "gemini-flash-lite-latest"
+
+# Split messaging
+SPLIT_MIN_LENGTH     = 280
+SPLIT_DELAY_BASE     = 1.2
+SPLIT_DELAY_PER_CHAR = 0.012
+SPLIT_DELAY_MAX      = 3.5
+
+# Rate limiter
+RATE_LIMIT       = 5
+call_timestamps: list[float] = []
+
+if not GOOGLE_API_KEY:
+    raise EnvironmentError("GOOGLE_API_KEY missing.")
+
+client = genai.Client(api_key=GOOGLE_API_KEY)
+
+# ---------------------------------------------------------------------------
+# Response types
+# ---------------------------------------------------------------------------
+
+@dataclass
+class MessageSegment:
+    text: str
+    delay: float = SPLIT_DELAY_BASE
+    typing: bool = True
+    attachment: Optional[str] = None
+
+@dataclass
+class ConversationResponse:
+    segments: list[MessageSegment] = field(default_factory=list)
+    reactions: list[str] = field(default_factory=list)
+    suggested_gif: Optional[str] = None
+
+    @property
+    def is_empty(self) -> bool:
+        return not self.segments
+
+    def first_text(self) -> str:
+        return " ".join(s.text for s in self.segments)
+
+# ---------------------------------------------------------------------------
+# Error classes
+# ---------------------------------------------------------------------------
+
+class GenerationError(Exception):
+    pass
+
+class TransientError(GenerationError):
+    pass
+
+class RateLimitError(GenerationError):
+    pass
+
+class MalformedResponseError(GenerationError):
+    pass
+
+class TimeoutGenerationError(GenerationError):
+    pass
+
+def _classify_error(e: Exception) -> GenerationError:
+    msg = str(e).lower()
+    if "429" in msg or "quota" in msg or "rate" in msg:
+        return RateLimitError(str(e))
+    if "timeout" in msg or "timed out" in msg:
+        return TimeoutGenerationError(str(e))
+    if "500" in msg or "503" in msg or "internal" in msg:
+        return TransientError(str(e))
+    return GenerationError(str(e))
+
+_ERROR_MESSAGES: dict[type, str] = {
+    RateLimitError:         "I'm a little overwhelmed right now — give me a moment.",
+    TimeoutGenerationError: "That took too long. Try again?",
+    TransientError:         "Something hiccupped on my end. Try again in a bit.",
+    MalformedResponseError: "I got confused by that one. Try rephrasing?",
+    GenerationError:        "Something went wrong. Try again.",
+}
+
+def _user_facing_error(e: GenerationError) -> str:
+    return _ERROR_MESSAGES.get(type(e), _ERROR_MESSAGES[GenerationError])
+
+# ---------------------------------------------------------------------------
+# Rate limiter
+# ---------------------------------------------------------------------------
+
+async def rate_limit():
+    global call_timestamps
+    now = time.time()
+    call_timestamps = [t for t in call_timestamps if now - t < 60]
+    if len(call_timestamps) >= RATE_LIMIT:
+        wait_time = 60 - (now - call_timestamps[0])
+        await asyncio.sleep(wait_time)
+    call_timestamps.append(time.time())
+
+# ---------------------------------------------------------------------------
+# Text splitter + response builder
+# ---------------------------------------------------------------------------
+
+def split_into_segments(text: str) -> list[str]:
+    if len(text) < SPLIT_MIN_LENGTH:
+        return [text]
+
+    paragraphs = [p.strip() for p in re.split(r"\n{2,}", text) if p.strip()]
+    if len(paragraphs) <= 1:
+        sentences = re.split(r"(?<=[.!?])\s+", text)
+        chunks: list[str] = []
+        current = ""
+        for s in sentences:
+            if len(current) + len(s) > 220 and current:
+                chunks.append(current.strip())
+                current = s
+            else:
+                current = (current + " " + s).strip() if current else s
+        if current:
+            chunks.append(current.strip())
+        return chunks if len(chunks) > 1 else [text]
+
+    return paragraphs
+
+
+def build_response(text: str) -> ConversationResponse:
+    segments_text = split_into_segments(text)
+    segments = []
+    for seg in segments_text:
+        delay = min(
+            SPLIT_DELAY_BASE + len(seg) * SPLIT_DELAY_PER_CHAR,
+            SPLIT_DELAY_MAX
+        )
+        segments.append(MessageSegment(text=seg, delay=delay, typing=True))
+    return ConversationResponse(segments=segments)
+
+
+def clean_text(text: str, limit: int = 4000) -> str:
+    if len(text) <= limit:
+        return text
+    cut = text[:limit]
+    last_dot = cut.rfind('.')
+    if last_dot > 1000:
+        return cut[:last_dot + 1]
+    return cut
+
+# ---------------------------------------------------------------------------
+# Multi-message sender
+# ---------------------------------------------------------------------------
+
+async def send_response(
+    response: ConversationResponse,
+    channel: discord.abc.Messageable,
+    *,
+    reply_to: Optional[discord.Message] = None,
+) -> None:
+    if not response.segments:
+        return
+
+    segments = [s for s in response.segments if s.text.strip()]
+    if not segments:
+        return
+
+    for i, segment in enumerate(segments):
+        if segment.typing and segment.delay > 0:
+            async with channel.typing():
+                await asyncio.sleep(segment.delay)
+
+        if i == 0 and reply_to is not None:
+            await reply_to.reply(segment.text)
+        else:
+            await channel.send(segment.text)
+
+# ---------------------------------------------------------------------------
+# Attachment helper
+# ---------------------------------------------------------------------------
+
+async def extract_image(message: Optional[discord.Message]) -> tuple[Optional[bytes], Optional[str]]:
+    """Extract all image attachments and return them as a list of (bytes, mime_type) tuples."""
+    if not message or not message.attachments:
+        return None, None
+    # Process first image attachment for now; multi-image batch is roadmap
+    for att in message.attachments:
+        if att.content_type and "image" in att.content_type:
+            try:
+                image_bytes = await att.read()
+                return image_bytes, att.content_type
+            except Exception as e:
+                logger.error(f"Failed to read attachment: {e}")
+    return None, None
+
+# ---------------------------------------------------------------------------
+# Core generation
+# ---------------------------------------------------------------------------
+
+async def generate(
+    prompt: str,
+    *,
+    current_persona: str,
+    channel_id: Optional[int] = None,
+    apply_persona: bool = True,
+    instruction_prefix: str = "",
+    username: str = "",
+    image_bytes: Optional[bytes] = None,
+    image_mime: Optional[str] = None,
+) -> ConversationResponse:
+    await rate_limit()
+    prompt = sanitize_prompt(prompt)
+
+    contents = memory_to_contents(channel_id) if channel_id is not None else []
+
+    user_text = f"{instruction_prefix}\n\n{prompt}".strip() if instruction_prefix else prompt
+    display_text = f"{username}: {prompt}" if username else prompt
+
+    parts = []
+    if user_text:
+        parts.append(types.Part(text=user_text))
+    if image_bytes:
+        parts.append(types.Part.from_bytes(data=image_bytes, mime_type=image_mime or "image/png"))
+    if not parts:
+        parts.append(types.Part(text="Describe this image"))
+
+    contents.append(types.Content(role="user", parts=parts))
+
+    if channel_id is not None:
+        LAST_DEBUG[channel_id] = user_text
+
+    try:
+        config = types.GenerateContentConfig(
+            system_instruction=current_persona if apply_persona else None,
+            max_output_tokens=1024,
+        )
+        response = await asyncio.to_thread(
+            client.models.generate_content,
+            model=MODEL_NAME,
+            contents=contents,
+            config=config,
+        )
+
+        if not response or not response.text:
+            raise MalformedResponseError("Empty response from model.")
+
+        text = clean_text(response.text)
+
+        if unsafe_output(text):
+            logger.warning("Output blocked by safety filter.")
+            return build_response("I can't respond to that.")
+
+        if channel_id is not None:
+            push_memory(channel_id, "user", user_text, display_text,
+                        client=client, model_name=MODEL_NAME)
+            push_memory(channel_id, "model", text, f"{BOT_NAME}: {text}",
+                        client=client, model_name=MODEL_NAME)
+
+        return build_response(text)
+
+    except GenerationError:
+        raise
+    except Exception as e:
+        classified = _classify_error(e)
+        logger.error(f"Gemini error [{type(classified).__name__}]: {e}")
+        raise classified from e
+
+
+async def safe_generate(
+    prompt: str,
+    *,
+    current_persona: str,
+    **kwargs,
+) -> ConversationResponse:
+    try:
+        return await generate(prompt, current_persona=current_persona, **kwargs)
+    except GenerationError as e:
+        msg = _user_facing_error(e)
+        logger.warning(f"safe_generate swallowed error: {type(e).__name__}")
+        return build_response(msg)
+    except Exception as e:
+        logger.error(f"safe_generate unexpected error: {e}")
+        return build_response("Something went wrong. Try again.")
