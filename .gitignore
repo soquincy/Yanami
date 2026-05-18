@@ -3,3 +3,4 @@ venv/
 persona.txt
 *.env
 utils/
+pnotes.md

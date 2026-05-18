@@ -1,4 +1,5 @@
-# main.py: Main code that loads the cogs and makes the bot run
+# main.py: Main code that loads the cogs and makes the bot run. Also contains the prefix command and the on_ready event that sends a message to the specified channel when the bot starts up. The bot also starts a FastAPI server in the background for future webhooks and health checks.
+
 import discord
 from discord.ext import commands
 from discord import abc
