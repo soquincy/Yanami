@@ -13,7 +13,7 @@ from dotenv import load_dotenv
 from google import genai
 from google.genai import types
 
-from utils.memory import memory_to_contents, push_memory
+from utils.memory import memory_to_contents, push_memory, inject_user_memory, extract_and_store_fact
 from utils.security import sanitize_prompt, unsafe_output
 from utils.config import LAST_DEBUG
 
@@ -247,6 +247,9 @@ async def generate(
     *,
     current_persona: str,
     channel_id: Optional[int] = None,
+    guild_id: Optional[int] = None,
+    user_id: Optional[int] = None,
+    message_id: Optional[int] = None,
     apply_persona: bool = True,
     instruction_prefix: str = "",
     username: str = "",
@@ -259,6 +262,13 @@ async def generate(
 
     user_text = f"{instruction_prefix}\n\n{prompt}".strip() if instruction_prefix else prompt
     display_text = f"{username}: {prompt}" if username else prompt
+
+    # Inject long-term user memory into system prompt
+    persona = current_persona if apply_persona else ""
+    if apply_persona and guild_id and user_id:
+        memory_block = inject_user_memory(guild_id, user_id, username)
+        if memory_block:
+            persona = f"{current_persona}\n\n{memory_block}"
 
     parts = []
     if user_text:
@@ -275,7 +285,7 @@ async def generate(
 
     try:
         config = types.GenerateContentConfig(
-            system_instruction=current_persona if apply_persona else None,
+            system_instruction=persona if apply_persona else None,
             max_output_tokens=1024,
         )
         response = await asyncio.to_thread(
@@ -300,6 +310,19 @@ async def generate(
             push_memory(channel_id, "model", text, f"{BOT_NAME}: {text}",
                         client=client, model_name=MODEL_NAME)
 
+        # Fire fact extraction async — never blocks response
+        if guild_id and user_id and message_id and channel_id and prompt.strip():
+            asyncio.create_task(extract_and_store_fact(
+                message_content=prompt,
+                display_name=username,
+                guild_id=guild_id,
+                user_id=user_id,
+                message_id=message_id,
+                channel_id=channel_id,
+                client=client,
+                model_name=MODEL_NAME,
+            ))
+
         return build_response(text)
 
     except GenerationError:
@@ -315,6 +338,9 @@ async def safe_generate(
     *,
     current_persona: str,
     attachments: Optional[list[tuple[bytes, str]]] = None,
+    guild_id: Optional[int] = None,
+    user_id: Optional[int] = None,
+    message_id: Optional[int] = None,
     **kwargs,
 ) -> ConversationResponse:
     try:
@@ -322,6 +348,9 @@ async def safe_generate(
             prompt,
             current_persona=current_persona,
             attachments=attachments,
+            guild_id=guild_id,
+            user_id=user_id,
+            message_id=message_id,
             **kwargs,
         )
     except GenerationError as e:
