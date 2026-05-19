@@ -1,5 +1,4 @@
 # utils/generation.py: Core AI generation pipeline, response types, and message sender.
-# This module handles all interactions with the Gemini API, including prompt assembly, response parsing, error handling, and rate limiting.
 
 import os
 import re

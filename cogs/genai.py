@@ -8,11 +8,8 @@
 # This should make the codebase easier to maintain and reason about, and allow for better separation of concerns.
 # The new structure also makes it easier to add features like autonomy mode, persona profiles, and web search without cluttering the main cog file.
 
-# cogs/genai.py: GenAI cog — wiring only. Logic lives in utils/.
-
 import asyncio
 import logging
-import random
 import time
 import urllib.parse
 from typing import Optional
@@ -29,6 +26,7 @@ from utils.generation import (
     ConversationResponse, build_response,
 )
 from utils.memory import channel_memory, channel_summary
+from utils.intent import evaluate_intent, FREQUENCY_THRESHOLD, INTENT_IGNORE
 from utils.persona import (
     PERSONA_DATA, CURRENT_PERSONA, PERSONA_LOCKED, LEGACY_DETECTED,
     SetPersonaGroup,
@@ -45,11 +43,12 @@ logger = logging.getLogger("FreesonaBot")
 
 # Debounce + autonomy state
 DEBOUNCE_SECONDS          = 1.2
-FREQUENCY_CHANCE          = {"low": 0.04, "default": 0.10, "high": 0.20}
-AUTONOMY_COOLDOWN_SECONDS = 120
+AUTONOMY_COOLDOWN_SECONDS = 120   # per channel, seconds
+AUTONOMY_USER_COOLDOWN    = 60    # per user, seconds — bot won't re-engage same user too soon
 
 _pending_responses: dict[int, asyncio.Task] = {}
-_autonomy_cooldown: dict[int, float]        = {}
+_autonomy_cooldown: dict[int, float]        = {}  # channel_id -> last fire
+_autonomy_user_cooldown: dict[int, float]   = {}  # user_id -> last fire
 
 
 class GenAICog(commands.Cog):
@@ -89,29 +88,42 @@ class GenAICog(commands.Cog):
         if ctx.valid:
             return
 
-        # Autonomy check
+        # Autonomy check — intent-first, no random.random()
         config = load_config()
         autonomy_on = config.get("autonomy", False)
 
-        if autonomy_on and not message.author.bot and message.content.strip():
-            frequency  = config.get("autonomy_frequency", "default")
-            chance     = FREQUENCY_CHANCE.get(frequency, 0.10)
-            now        = time.time()
-            last_fire  = _autonomy_cooldown.get(message.channel.id, 0)
+        if autonomy_on and not message.author.bot:
+            frequency    = config.get("autonomy_frequency", "default")
+            threshold    = FREQUENCY_THRESHOLD.get(frequency, 0.50)
+            now          = time.time()
+            last_channel = _autonomy_cooldown.get(message.channel.id, 0)
+            last_user    = _autonomy_user_cooldown.get(message.author.id, 0)
 
-            if now - last_fire > AUTONOMY_COOLDOWN_SECONDS and random.random() < chance:
-                _autonomy_cooldown[message.channel.id] = now
-                logger.info(f"Autonomy firing in channel {message.channel.id}")
-                attachments = await extract_attachments(message)
-                response = await safe_generate(
-                    message.content,
-                    current_persona=CURRENT_PERSONA,
-                    channel_id=message.channel.id,
-                    username=message.author.display_name,
-                    attachments=attachments,
-                )
-                await send_response(response, message.channel)
-                return
+            channel_ready = now - last_channel > AUTONOMY_COOLDOWN_SECONDS
+            user_ready    = now - last_user    > AUTONOMY_USER_COOLDOWN
+
+            if channel_ready and user_ready:
+                has_memory = message.channel.id in channel_memory
+                intent     = evaluate_intent(message, self.bot.user, has_memory)
+
+                if intent.intent != INTENT_IGNORE and intent.confidence >= threshold:
+                    _autonomy_cooldown[message.channel.id]    = now
+                    _autonomy_user_cooldown[message.author.id] = now
+                    logger.info(
+                        f"Autonomy firing | channel={message.channel.id} "
+                        f"confidence={intent.confidence:.2f} intent={intent.intent} "
+                        f"targets={intent.targets}"
+                    )
+                    attachments = await extract_attachments(message)
+                    response = await safe_generate(
+                        message.content,
+                        current_persona=CURRENT_PERSONA,
+                        channel_id=message.channel.id,
+                        username=message.author.display_name,
+                        attachments=attachments,
+                    )
+                    await send_response(response, message.channel)
+                    return
 
         # Debounce
         user_id           = message.author.id
