@@ -196,19 +196,48 @@ async def send_response(
 # Attachment helper
 # ---------------------------------------------------------------------------
 
-async def extract_image(message: Optional[discord.Message]) -> tuple[Optional[bytes], Optional[str]]:
-    """Extract all image attachments and return them as a list of (bytes, mime_type) tuples."""
+SUPPORTED_MIME_TYPES = {
+    # Images
+    "image/png", "image/jpeg", "image/webp", "image/gif", "image/heic", "image/heif",
+    # Documents
+    "application/pdf",
+    "text/plain", "text/html", "text/css", "text/markdown", "text/csv",
+    "text/xml", "text/rtf",
+    "application/rtf",
+    # Code
+    "application/x-javascript", "text/javascript",
+    "application/x-python", "text/x-python",
+    # Audio
+    "audio/mpeg", "audio/mp3", "audio/wav", "audio/aiff",
+    "audio/aac", "audio/ogg", "audio/flac", "audio/x-flac",
+    # Video
+    "video/mp4", "video/mpeg", "video/mov", "video/quicktime",
+    "video/avi", "video/x-msvideo", "video/webm",
+    "video/wmv", "video/x-ms-wmv", "video/3gpp",
+}
+
+async def extract_attachments(message: Optional[discord.Message]) -> list[tuple[bytes, str]]:
+    """
+    Extract all supported attachments (images + PDFs) from a message.
+    Returns a list of (bytes, mime_type) tuples in attachment order.
+    """
     if not message or not message.attachments:
-        return None, None
-    # Process first image attachment for now; multi-image batch is roadmap
+        return []
+
+    results = []
     for att in message.attachments:
-        if att.content_type and "image" in att.content_type:
-            try:
-                image_bytes = await att.read()
-                return image_bytes, att.content_type
-            except Exception as e:
-                logger.error(f"Failed to read attachment: {e}")
-    return None, None
+        mime = att.content_type or ""
+        # Strip parameters e.g. "image/png; charset=utf-8" -> "image/png"
+        mime_base = mime.split(";")[0].strip()
+        if mime_base not in SUPPORTED_MIME_TYPES:
+            continue
+        try:
+            data = await att.read()
+            results.append((data, mime_base))
+        except Exception as e:
+            logger.error(f"Failed to read attachment {att.filename}: {e}")
+
+    return results
 
 # ---------------------------------------------------------------------------
 # Core generation
@@ -222,8 +251,7 @@ async def generate(
     apply_persona: bool = True,
     instruction_prefix: str = "",
     username: str = "",
-    image_bytes: Optional[bytes] = None,
-    image_mime: Optional[str] = None,
+    attachments: Optional[list[tuple[bytes, str]]] = None,
 ) -> ConversationResponse:
     await rate_limit()
     prompt = sanitize_prompt(prompt)
@@ -236,10 +264,10 @@ async def generate(
     parts = []
     if user_text:
         parts.append(types.Part(text=user_text))
-    if image_bytes:
-        parts.append(types.Part.from_bytes(data=image_bytes, mime_type=image_mime or "image/png"))
+    for att_bytes, att_mime in (attachments or []):
+        parts.append(types.Part.from_bytes(data=att_bytes, mime_type=att_mime))
     if not parts:
-        parts.append(types.Part(text="Describe this image"))
+        parts.append(types.Part(text="Describe this."))
 
     contents.append(types.Content(role="user", parts=parts))
 
@@ -287,10 +315,16 @@ async def safe_generate(
     prompt: str,
     *,
     current_persona: str,
+    attachments: Optional[list[tuple[bytes, str]]] = None,
     **kwargs,
 ) -> ConversationResponse:
     try:
-        return await generate(prompt, current_persona=current_persona, **kwargs)
+        return await generate(
+            prompt,
+            current_persona=current_persona,
+            attachments=attachments,
+            **kwargs,
+        )
     except GenerationError as e:
         msg = _user_facing_error(e)
         logger.warning(f"safe_generate swallowed error: {type(e).__name__}")

@@ -8,6 +8,8 @@
 # This should make the codebase easier to maintain and reason about, and allow for better separation of concerns.
 # The new structure also makes it easier to add features like autonomy mode, persona profiles, and web search without cluttering the main cog file.
 
+# cogs/genai.py: GenAI cog — wiring only. Logic lives in utils/.
+
 import asyncio
 import logging
 import random
@@ -23,7 +25,7 @@ import os
 
 from utils.config import load_config, save_config, embed_footer, LAST_DEBUG
 from utils.generation import (
-    safe_generate, send_response, extract_image,
+    safe_generate, send_response, extract_attachments,
     ConversationResponse, build_response,
 )
 from utils.memory import channel_memory, channel_summary
@@ -100,14 +102,13 @@ class GenAICog(commands.Cog):
             if now - last_fire > AUTONOMY_COOLDOWN_SECONDS and random.random() < chance:
                 _autonomy_cooldown[message.channel.id] = now
                 logger.info(f"Autonomy firing in channel {message.channel.id}")
-                image_bytes, image_mime = await extract_image(message)
+                attachments = await extract_attachments(message)
                 response = await safe_generate(
                     message.content,
                     current_persona=CURRENT_PERSONA,
                     channel_id=message.channel.id,
                     username=message.author.display_name,
-                    image_bytes=image_bytes,
-                    image_mime=image_mime,
+                    attachments=attachments,
                 )
                 await send_response(response, message.channel)
                 return
@@ -126,14 +127,13 @@ class GenAICog(commands.Cog):
         async def debounced_respond():
             try:
                 await asyncio.sleep(DEBOUNCE_SECONDS)
-                image_bytes, image_mime = await extract_image(message_snapshot)
+                attachments = await extract_attachments(message_snapshot)
                 response = await safe_generate(
                     content_snapshot or "What's in this image?",
                     current_persona=CURRENT_PERSONA,
                     channel_id=channel_snapshot.id,
                     username=username_snapshot,
-                    image_bytes=image_bytes,
-                    image_mime=image_mime,
+                    attachments=attachments,
                 )
                 await send_response(response, channel_snapshot, reply_to=message_snapshot)
             except asyncio.CancelledError:
@@ -152,7 +152,7 @@ class GenAICog(commands.Cog):
             await ctx.send("AI commands are not available in DMs.")
             return
         await ctx.defer()
-        image_bytes, image_mime = await extract_image(ctx.message)
+        attachments = await extract_attachments(ctx.message)
         response = await safe_generate(
             query,
             current_persona=CURRENT_PERSONA,
@@ -163,8 +163,7 @@ class GenAICog(commands.Cog):
                 "Each idea must be separated clearly."
             ),
             apply_persona=True,
-            image_bytes=image_bytes,
-            image_mime=image_mime,
+            attachments=attachments,
         )
         embed = discord.Embed(
             title=f"{BOT_NAME} says...",
@@ -182,7 +181,7 @@ class GenAICog(commands.Cog):
         if ctx.guild is None:
             await ctx.send("AI commands are not available in DMs.")
             return
-        image_bytes, image_mime = await extract_image(ctx.message)
+        attachments = await extract_attachments(ctx.message)
         response = await safe_generate(
             query,
             current_persona=CURRENT_PERSONA,
@@ -192,8 +191,7 @@ class GenAICog(commands.Cog):
                 "Do NOT use markdown headings like ###."
             ),
             username=ctx.author.display_name,
-            image_bytes=image_bytes,
-            image_mime=image_mime,
+            attachments=attachments,
         )
         embed = discord.Embed(
             title=f"{BOT_NAME} answers...",
