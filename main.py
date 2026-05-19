@@ -47,7 +47,7 @@ class Freesona(commands.Bot):
         extensions = [
             "cogs.ytdlp", "cogs.hello", "cogs.help",
             "cogs.utils", "cogs.genai", "cogs.wolfram", "cogs.status",
-            "cogs.mvsep",
+            "cogs.mvsep", "cogs.ping",
         ]
         for ext in extensions:
             await self.load_extension(ext)
